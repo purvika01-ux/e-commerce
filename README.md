@@ -140,6 +140,10 @@ On the **Customers** page, the three actions are:
 - **Decide (no send)**: makes a real decision without delivering it.
 - **Decide & send**: decides and delivers through Telegram, for linked customers only.
 
+## Deployment
+
+The app is deployed as one always-on **Railway** service with **MongoDB Atlas**. The root `package.json` provides `build` and `start` for the host. See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for the step-by-step guide: Atlas setup, seeding, admin login, Railway variables and the laptop-to-cloud cut-over.
+
 ## Health and maintenance
 
 `GET /api/health` returns:

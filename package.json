@@ -1,0 +1,14 @@
+{
+  "name": "offerly-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offerly AI — personalised offer engine (server + dashboard). Root scripts used by Railway and other Node hosts.",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "build": "npm --prefix server ci && npm --prefix client ci --include=dev && npm --prefix client run build",
+    "start": "npm --prefix server start",
+    "test": "npm --prefix server test"
+  }
+}
