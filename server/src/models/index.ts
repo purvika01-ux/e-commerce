@@ -207,7 +207,7 @@ const engagementSchema = new Schema({
   decisionId: { type: Schema.Types.ObjectId, ref: 'Decision', required: true },
   customerId: { type: Schema.Types.ObjectId, ref: 'Customer', required: true },
   grantCode: { type: String, required: true },
-  type: { type: String, enum: ['delivered', 'claimed', 'declined'], required: true },
+  type: { type: String, enum: ['delivered', 'claimed', 'declined', 'expired'], required: true },
   idempotencyKey: { type: String, required: true, unique: true },
   occurredAt: { type: Date, required: true },
   dataOrigin: { type: String, enum: DATA_ORIGINS, default: 'classmate' },

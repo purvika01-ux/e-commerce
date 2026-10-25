@@ -37,7 +37,7 @@ export interface Health {
   status: string;
   db: { status: string; latencyMs?: number };
   ai: { mode: 'live' | 'fallback_only'; model: string | null };
-  telegram: { enabled: boolean; botUsername: string | null };
+  telegram: { enabled: boolean; botUsername: string | null; status: string; lastError?: { kind: string; message: string } | null };
 }
 
 export interface Violation {

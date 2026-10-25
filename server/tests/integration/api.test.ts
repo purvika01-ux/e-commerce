@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/app';
+import type { ServiceStatus } from '../../src/routes/api';
 import { createAnthropicAiClient } from '../../src/ai/anthropicClient';
 import { createTelegramSender } from '../../src/delivery/telegramSender';
 import { loadConfig } from '../../src/config';
@@ -11,6 +12,7 @@ import { connectTestDb, dropTestDb, FakeTelegram, key, linkTelegram, makeService
 let fx: Awaited<ReturnType<typeof seedFixtures>>;
 let telegram: FakeTelegram;
 let app: ReturnType<typeof buildApp>;
+let serviceStatus: ServiceStatus;
 
 beforeAll(connectTestDb);
 afterAll(dropTestDb);
@@ -19,12 +21,8 @@ beforeEach(async () => {
   fx = await seedFixtures();
   telegram = new FakeTelegram();
   const { services, clock } = makeServices({ telegram });
-  app = buildApp({
-    services,
-    clock,
-    logger: silentLogger,
-    status: () => ({ aiMode: 'fallback_only', model: null, telegram: { enabled: true, botUsername: 'test_bot' } }),
-  });
+  serviceStatus = { aiMode: 'fallback_only', model: null, telegram: { enabled: true, botUsername: 'test_bot', status: 'polling' } };
+  app = buildApp({ services, clock, logger: silentLogger, status: () => serviceStatus });
 });
 
 describe('API', () => {
@@ -33,6 +31,18 @@ describe('API', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ status: 'ok', db: { status: 'connected' } });
     expect(res.headers['x-request-id']).toBeTruthy();
+  });
+
+  it('GET /api/health stays 200 but reports degraded when the bot has failed', async () => {
+    serviceStatus.telegram = {
+      ...serviceStatus.telegram,
+      status: 'failed',
+      lastError: { kind: 'conflict', message: 'Another process is polling this bot token', at: new Date() },
+    };
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('degraded');
+    expect(res.body.telegram).toMatchObject({ status: 'failed', lastError: { kind: 'conflict' } });
   });
 
   it('POST /api/recommendations requires an Idempotency-Key and validates the body', async () => {

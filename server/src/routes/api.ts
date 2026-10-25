@@ -16,7 +16,20 @@ import type { Services } from '../services';
 export interface ApiDeps {
   services: Services;
   clock: Clock;
-  status: () => { aiMode: 'live' | 'fallback_only'; model: string | null; telegram: { enabled: boolean; botUsername: string | null } };
+  status: () => ServiceStatus;
+}
+
+export interface ServiceStatus {
+  aiMode: 'live' | 'fallback_only';
+  model: string | null;
+  telegram: {
+    enabled: boolean;
+    botUsername: string | null;
+    status: 'disabled' | 'starting' | 'polling' | 'failed' | 'stopped';
+    lastError?: { kind: string; message: string; at: Date } | null;
+    nextRetryAt?: Date | null;
+  };
+  maintenance?: { lastRunAt: Date | null; lastError: string | null; lastResult: Record<string, unknown> | null };
 }
 
 const objectId = z.string().refine((v) => Types.ObjectId.isValid(v), 'must be a valid id');
@@ -81,11 +94,16 @@ export function apiRouter(deps: ApiDeps): Router {
   r.get('/health', async (_req, res) => {
     const db = await pingMongo();
     const s = deps.status();
+    // HTTP 503 only when the database is down (the service cannot work at all). A failed bot keeps
+    // 200 so a host health check does not restart-loop on a token conflict; it is reported as degraded.
+    const botFailed = s.telegram.enabled && s.telegram.status === 'failed';
+    const maintenanceFailing = Boolean(s.maintenance?.lastError);
     res.status(db.status === 'connected' ? 200 : 503).json({
-      status: db.status === 'connected' ? 'ok' : 'degraded',
+      status: db.status !== 'connected' || botFailed || maintenanceFailing ? 'degraded' : 'ok',
       db,
       ai: { mode: s.aiMode, model: s.model },
       telegram: s.telegram,
+      maintenance: s.maintenance ?? null,
       time: clock.now(),
     });
   });

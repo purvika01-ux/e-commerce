@@ -105,6 +105,24 @@ On the **Customers** page, the three actions are:
 - **Decide (no send)**: makes a real decision without delivering it.
 - **Decide & send**: decides and delivers through Telegram, for linked customers only.
 
+## Health and maintenance
+
+`GET /api/health` returns:
+
+- `ok`, `degraded` or HTTP 503 (database down);
+- the bot's polling status (`polling`, `failed` with the reason, and when it will retry);
+- the last maintenance run.
+
+If polling fails fatally, for example a Telegram 409 because another process is polling the same token, or a revoked token, the error is logged. The API keeps running, and polling is retried with backoff (30 s, doubling, up to 10 min).
+
+A maintenance job runs every minute:
+
+| Job | What it does |
+|---|---|
+| Expiry | Marks lapsed grants `expired` and returns their reserved budget, exactly once |
+| Recovery | Closes work interrupted by a crash: decisions stuck in `pending`, triggers stuck in `processing`, and deliveries stuck in `sending` for 10+ minutes. A stuck delivery is voided rather than resent, so a possible missing message is preferred over a duplicate. |
+| Reconciler | Recomputes each offer's budget and usage counters from its decisions, and repairs drift with a compare-and-set update. It skips any offer with a decision in flight. |
+
 ## Tests
 
 ```bash

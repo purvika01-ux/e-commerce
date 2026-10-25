@@ -52,6 +52,23 @@ export async function releaseReservation(offerId: string, costPaise: number, opt
   await Offer.updateOne(filter, { $inc: inc });
 }
 
+/**
+ * Cancels an approved decision and voids its grant, releasing budget and usage exactly once:
+ * the release only happens if this call performed the approved → cancelled transition.
+ */
+export async function voidApprovedDecision(decisionId: string, reason: string): Promise<boolean> {
+  const before = await Decision.findOneAndUpdate(
+    { _id: decisionId, status: 'approved' },
+    { $set: { status: 'cancelled', outcomeReason: reason, 'grant.status': 'void' } },
+  ).lean();
+  if (!before) return false;
+  const s = before.offerSnapshot as { offerId: string; estimatedCostPaise: number } | null;
+  const held = ['issued', 'claimed'].includes((before.grant as { status?: string } | undefined)?.status ?? '');
+  // Declined or expired grants already returned their budget; only the usage slot remains to release.
+  if (s) await releaseReservation(s.offerId, held ? s.estimatedCostPaise : 0, { releaseUsage: true });
+  return true;
+}
+
 /** Per-customer offer history, computed fresh. excludeDecisionId lets a pre-send recheck ignore itself. */
 export async function computeContactStats(customerId: string, ruleSet: RuleSetRecord, now: Date, excludeDecisionId?: string): Promise<ContactStats> {
   const windowDays = ruleParams(ruleSet, 'FREQUENCY_CAP')?.windowDays ?? 7;

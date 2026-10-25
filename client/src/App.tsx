@@ -77,8 +77,17 @@ export default function App() {
                 </p>
                 <p className="flex items-center gap-1.5">
                   <Bot size={13} /> Telegram{' '}
-                  <Badge tone={h.telegram.enabled ? 'green' : 'slate'}>{h.telegram.enabled ? `@${h.telegram.botUsername}` : 'not configured'}</Badge>
+                  {!h.telegram.enabled ? (
+                    <Badge tone="slate">not configured</Badge>
+                  ) : h.telegram.status === 'polling' ? (
+                    <Badge tone="green">@{h.telegram.botUsername}</Badge>
+                  ) : h.telegram.status === 'failed' ? (
+                    <Badge tone="red">bot down — retrying</Badge>
+                  ) : (
+                    <Badge tone="amber">{h.telegram.status}</Badge>
+                  )}
                 </p>
+                {h.telegram.lastError && h.telegram.status === 'failed' && <p className="text-rose-700">{h.telegram.lastError.message}</p>}
               </>
             )}
           </div>

@@ -1,5 +1,5 @@
 import type { OfferSnapshot } from '../domain/types';
-import { computeContactStats, releaseReservation } from '../decision/ledger';
+import { computeContactStats, voidApprovedDecision } from '../decision/ledger';
 import { loadActiveRuleSet, type Clock } from '../decision/orchestrator';
 import { AppError, notFound } from '../infra/errors';
 import type { Logger } from '../infra/logger';
@@ -24,13 +24,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const maxAttempts = deps.maxAttempts ?? 3;
 
-  async function cancel(decisionId: string, reason: string, snapshot: OfferSnapshot | null) {
-    const res = await Decision.updateOne(
-      { _id: decisionId, status: 'approved' },
-      { $set: { status: 'cancelled', outcomeReason: reason, 'grant.status': 'void' } },
-    );
-    if (res.modifiedCount && snapshot) await releaseReservation(snapshot.offerId, snapshot.estimatedCostPaise, { releaseUsage: true });
-  }
+  const cancel = (decisionId: string, reason: string) => voidApprovedDecision(decisionId, reason);
 
   async function deliver(decisionId: string): Promise<Record<string, any>> {
     const decision = await Decision.findById(decisionId).lean();
@@ -60,7 +54,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
 
     const finishCancelled = async (violations: Violation[]) => {
       await Decision.updateOne({ _id: decisionId }, { $push: { validationHistory: { ok: false, phase: 'presend', source: 'presend', violations, checkedAt: now, validatorVersion: 'v1' } } });
-      await cancel(decisionId, 'PRESEND_CHECK_FAILED', snapshot);
+      await cancel(decisionId, 'PRESEND_CHECK_FAILED');
       await Delivery.updateOne({ _id: deliveryId }, { status: 'cancelled_precheck', failureReason: violations.map((v) => v.rule).join(', ') });
       return (await Delivery.findById(deliveryId).lean())!;
     };
@@ -126,7 +120,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
         }
         if (err.kind === 'blocked') await TelegramLink.updateOne({ chatId }, { status: 'blocked' });
         await Delivery.updateOne({ _id: deliveryId }, { status: 'failed_permanent', attempts, failureReason: err.kind });
-        await cancel(decisionId, `DELIVERY_FAILED_${err.kind.toUpperCase()}`, snapshot);
+        await cancel(decisionId, `DELIVERY_FAILED_${err.kind.toUpperCase()}`);
         deps.logger.warn('telegram delivery failed', { decisionId, kind: err.kind });
         return (await Delivery.findById(deliveryId).lean())!;
       }

@@ -100,7 +100,7 @@ Every view has loading, empty and error states, and every page shows a synthetic
 - Admin authentication. The server binds to `127.0.0.1` only. This must be added before public deployment.
 - Rate limiting and webhook mode.
 - Redemption (simulated checkout).
-- Grant expiry sweep and the reconciler.
+- ~~Grant expiry sweep and the reconciler.~~ Added after the MVP (reliability step 1, see README "Health and maintenance").
 - Quiet hours and daily send cap.
 - Event ingestion API and scheduler triggers (cart abandonment, inactivity).
 - Email.
