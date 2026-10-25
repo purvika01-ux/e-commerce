@@ -1,13 +1,14 @@
-import { Bot, Cpu, Database, Gift, LayoutDashboard, ListChecks, ScrollText, Sparkles, Users } from 'lucide-react';
+import { Bot, Cpu, Database, Gift, LayoutDashboard, ListChecks, LogOut, ScrollText, Sparkles, Users } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useState } from 'react';
-import { api, type Health } from './api';
+import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError, UNAUTHENTICATED_EVENT, type Health } from './api';
+import { Login } from './pages/Login';
 import { Customers } from './pages/Customers';
 import { Decisions } from './pages/Decisions';
 import { Offers } from './pages/Offers';
 import { Overview } from './pages/Overview';
 import { Rules } from './pages/Rules';
-import { Badge, useAsync } from './ui';
+import { Badge, ErrorState, Loading, useAsync } from './ui';
 
 type Tab = 'overview' | 'customers' | 'offers' | 'rules' | 'decisions';
 const TABS: { id: Tab; label: string; icon: typeof Users }[] = [
@@ -26,7 +27,41 @@ const SUBTITLES: Record<Tab, string> = {
   decisions: 'Full audit trail of every decision',
 };
 
+type AuthState = { state: 'checking' } | { state: 'signed_out' } | { state: 'ready'; user: string | null } | { state: 'error'; error: ApiError };
+
+/** Checks the session first; shows the sign-in screen when the server requires a login. */
 export default function App() {
+  const [auth, setAuth] = useState<AuthState>({ state: 'checking' });
+
+  const check = useCallback(async () => {
+    try {
+      const me = await api.get<{ authRequired: boolean; user: { username: string } | null }>('/auth/me');
+      setAuth({ state: 'ready', user: me.user?.username ?? null });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) setAuth({ state: 'signed_out' });
+      else setAuth({ state: 'error', error: e instanceof ApiError ? e : new ApiError(0, 'ERROR', String(e)) });
+    }
+  }, []);
+
+  useEffect(() => {
+    void check();
+    const onExpired = () => setAuth({ state: 'signed_out' });
+    window.addEventListener(UNAUTHENTICATED_EVENT, onExpired);
+    return () => window.removeEventListener(UNAUTHENTICATED_EVENT, onExpired);
+  }, [check]);
+
+  async function logout() {
+    await api.post('/auth/logout', {}).catch(() => undefined);
+    setAuth({ state: 'signed_out' });
+  }
+
+  if (auth.state === 'checking') return <div className="grid min-h-full place-items-center"><Loading label="Starting Offerly AI…" /></div>;
+  if (auth.state === 'error') return <div className="mx-auto max-w-md p-8"><ErrorState error={auth.error} onRetry={check} /></div>;
+  if (auth.state === 'signed_out') return <Login onSignedIn={check} />;
+  return <Dashboard user={auth.user} onLogout={logout} />;
+}
+
+function Dashboard({ user, onLogout }: { user: string | null; onLogout: () => void }) {
   const [tab, setTab] = useState<Tab>('overview');
   const [openDecision, setOpenDecision] = useState<string | null>(null);
   const health = useAsync(() => api.get<Health>('/health'));
@@ -91,6 +126,18 @@ export default function App() {
               </>
             )}
           </div>
+          {user ? (
+            <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
+              <span className="truncate text-ink-700">
+                Signed in as <b>{user}</b>
+              </span>
+              <button onClick={onLogout} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-ink-700 hover:bg-slate-100">
+                <LogOut size={13} /> Sign out
+              </button>
+            </div>
+          ) : (
+            <p className="mt-3 hidden text-xs text-amber-800 md:block">Admin login is off (local only).</p>
+          )}
         </nav>
 
         <main className="min-w-0 flex-1">

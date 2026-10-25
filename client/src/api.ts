@@ -9,15 +9,26 @@ export class ApiError extends Error {
   }
 }
 
+/** Fired when the session is missing or expired, so the app can show the sign-in screen. */
+export const UNAUTHENTICATED_EVENT = 'offerly:unauthenticated';
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
+    res = await fetch(`/api${path}`, {
+      ...init,
+      credentials: 'same-origin',
+      // The custom header is the server's CSRF check for state-changing requests.
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'offerly', ...(init?.headers ?? {}) },
+    });
   } catch {
     throw new ApiError(0, 'NETWORK', 'Cannot reach the Offerly server. Is it running on port 4000?');
   }
-  const body = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, body?.error?.code ?? 'ERROR', body?.error?.message ?? `Request failed (${res.status})`, body?.error?.details);
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    if (res.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event(UNAUTHENTICATED_EVENT));
+    throw new ApiError(res.status, body?.error?.code ?? 'ERROR', body?.error?.message ?? `Request failed (${res.status})`, body?.error?.details);
+  }
   return body as T;
 }
 

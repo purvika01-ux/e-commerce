@@ -5,6 +5,7 @@ import type { Logger } from '../infra/logger';
 import { Customer, Decision, TelegramLink } from '../models';
 import type { Services } from '../services';
 import { termsHeadline, formatIst } from '../rules/terms';
+import { createRateLimiter } from '../security/rateLimit';
 import { linkChat, PERSONA_LABELS, unlinkChat } from './linking';
 
 const WELCOME = [
@@ -46,8 +47,12 @@ function friendlyNoOffer(decision: Record<string, any> | null): string {
   return 'No offer matches your profile right now. Try again later!';
 }
 
+/** One /offer per chat per window (default 10 s). */
+export const OFFER_COOLDOWN_MS = 10_000;
+
 export function createBot(token: string, services: Services, logger: Logger): Bot {
   const bot = new Bot(token);
+  const offerThrottle = createRateLimiter({ windowMs: OFFER_COOLDOWN_MS, max: 1 });
 
   const activeLink = (chatId: number) => TelegramLink.findOne({ chatId, status: 'active' }).lean();
 
@@ -85,6 +90,9 @@ export function createBot(token: string, services: Services, logger: Logger): Bo
   bot.command('offer', async (ctx) => {
     const link = await activeLink(ctx.chat.id);
     if (!link) return void (await ctx.reply('Send /start first to pick your shopper profile.'));
+    // Each /offer can call Claude, so repeated taps from one chat are throttled before any work.
+    const throttle = offerThrottle.hit(`chat:${ctx.chat.id}`);
+    if (!throttle.allowed) return void (await ctx.reply(`⏳ Please wait ${throttle.retryAfterSec}s before asking for another offer.`));
     await TelegramLink.updateOne({ _id: link._id }, { lastInteractionAt: new Date() });
     await ctx.reply('🔎 Checking your profile and our offer rules…');
     try {

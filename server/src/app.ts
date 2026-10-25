@@ -7,10 +7,33 @@ import mongoose from 'mongoose';
 import { AppError } from './infra/errors';
 import type { Logger } from './infra/logger';
 import { apiRouter, type ApiDeps } from './routes/api';
+import { authRouter, csrfGuard, requireAuth, securityHeaders, type AuthConfig } from './security/http';
+import { createRateLimiter, DEFAULT_RATE_LIMITS, rateLimit, type RateLimitSettings } from './security/rateLimit';
 
-export function buildApp(deps: ApiDeps & { logger: Logger; serveClient?: boolean }) {
+export interface AppOptions {
+  logger: Logger;
+  serveClient?: boolean;
+  /** null = admin login disabled (only allowed when bound to localhost; enforced by config). */
+  auth?: AuthConfig | null;
+  rateLimits?: Partial<RateLimitSettings>;
+  /** Express "trust proxy" setting, needed behind a hosting proxy so rate limits see the real client IP. */
+  trustProxy?: boolean | number;
+  hsts?: boolean;
+}
+
+export function buildApp(deps: ApiDeps & AppOptions) {
   const app = express();
+  const auth = deps.auth ?? null;
+  const limits = { ...DEFAULT_RATE_LIMITS, ...deps.rateLimits };
+  const apiLimiter = createRateLimiter({ windowMs: limits.windowMs, max: limits.api });
+  const recommendationLimiter = createRateLimiter({ windowMs: limits.windowMs, max: limits.recommendations });
+  const loginLimiter = createRateLimiter({ windowMs: limits.windowMs, max: limits.login });
+  // Signed-in requests are limited per admin; anything else per client IP.
+  const clientKey = (req: Request, res: Response) => String(res.locals.user ?? req.ip ?? 'unknown');
+
   app.disable('x-powered-by');
+  app.set('trust proxy', deps.trustProxy ?? false);
+  app.use(securityHeaders({ hsts: deps.hsts ?? false }));
   app.use(express.json({ limit: '100kb' }));
   app.use((req, res, next) => {
     const incoming = req.get('X-Request-Id');
@@ -20,6 +43,12 @@ export function buildApp(deps: ApiDeps & { logger: Logger; serveClient?: boolean
     next();
   });
 
+  // Order matters: per-IP limit → login/logout/me → session required → CSRF header → per-route limits → API.
+  app.use('/api', rateLimit(apiLimiter, (req) => `ip:${req.ip}`));
+  app.use('/api/auth', authRouter(auth, deps.clock, loginLimiter));
+  app.use('/api', requireAuth(auth, deps.clock));
+  app.use('/api', csrfGuard(auth));
+  app.post('/api/recommendations', rateLimit(recommendationLimiter, (req, res) => `rec:${clientKey(req, res)}`));
   app.use('/api', apiRouter(deps));
   app.use('/api', (_req, _res, next) => next(new AppError('NOT_FOUND', 404, 'Route not found')));
 

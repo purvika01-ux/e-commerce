@@ -88,11 +88,25 @@ async function main() {
   const maintenance = createMaintenance({ clock, logger });
   maintenance.start();
 
+  if (!config.authEnabled) {
+    logger.warn('Admin login is OFF (allowed only on localhost). Run npm run setup-admin and add the values to server/.env to enable it.');
+  }
   const app = buildApp({
     services,
     clock,
     logger,
     serveClient: true,
+    auth: config.authEnabled
+      ? {
+          username: config.ADMIN_USERNAME,
+          passwordHash: config.ADMIN_PASSWORD_HASH!,
+          sessionSecret: config.SESSION_SECRET!,
+          secureCookie: config.NODE_ENV === 'production',
+          sessionTtlMs: config.SESSION_TTL_HOURS * 3_600_000,
+        }
+      : null,
+    trustProxy: config.TRUST_PROXY,
+    hsts: config.NODE_ENV === 'production',
     status: () => {
       const bot = supervisor?.state();
       return {

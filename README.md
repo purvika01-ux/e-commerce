@@ -66,9 +66,44 @@ For UI development with hot reload, run `npm run dev` in `client/` (http://local
 | `AI_MODE` | `auto` (live when a key is set), `off` |
 | `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
 | `TELEGRAM_MODE` | `auto` (long polling when a token is set), `off` |
-| `HOST` / `PORT` | Default `127.0.0.1:4000`. The MVP has **no admin login**, so keep it on localhost. |
+| `HOST` / `PORT` | Default `127.0.0.1:4000` |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `SESSION_SECRET` | Admin login (see below). **Required** when `NODE_ENV=production` or `HOST` isn't localhost. |
+| `SESSION_TTL_HOURS` | Sign-in lifetime, default 8 |
+| `NODE_ENV` | `production` adds the Secure cookie flag and HSTS, and requires the admin login |
+| `TRUST_PROXY` | Set `true` behind a hosting proxy, so rate limits see real client IPs |
 
 Never commit `server/.env`; it is git-ignored. If a token leaks, revoke it: use `/revoke` in BotFather, or rotate the key in the Anthropic console.
+
+### Admin login
+
+```bash
+npm --prefix server run setup-admin
+```
+
+The script asks for a password (at least 12 characters) without displaying it. It prints `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` and a random `SESSION_SECRET`; paste those into `server/.env`, or your host's environment settings, and restart. The password itself is never stored, only its scrypt hash. Changing `SESSION_SECRET` signs everyone out.
+
+Without these values, the server runs **with no login**, but only on localhost. It refuses to start in production or on a public `HOST`.
+
+**Security in place:**
+- **Session:** an httpOnly, `SameSite=Strict` cookie that expires after 8 hours.
+- **CSRF check:** a required `X-Requested-With: offerly` header on every change request.
+- **Login errors:** the same "incorrect username or password" message, so valid usernames aren't revealed.
+- **Rate limits** (per process):
+
+  | What | Limit |
+  |---|---|
+  | Login | 5 per minute per IP |
+  | Recommendations | 30 per minute per admin |
+  | All API calls | 300 per minute per IP |
+  | Telegram `/offer` | 1 per 10 seconds per chat |
+
+- **Security headers:** Content-Security-Policy, nosniff, frame denial and referrer policy, plus HSTS in production.
+
+**Not covered:**
+- one admin account only, with no roles;
+- sign-out clears the cookie but doesn't revoke other sessions (rotate `SESSION_SECRET` for that);
+- rate limits are in memory, so they assume a single server instance;
+- Telegram webhook mode isn't implemented (long polling only).
 
 ## Telegram setup
 

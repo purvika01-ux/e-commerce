@@ -97,7 +97,7 @@ Every view has loading, empty and error states, and every page shows a synthetic
 
 ## 4. Deferred (not in this MVP)
 
-- Admin authentication. The server binds to `127.0.0.1` only. This must be added before public deployment.
+- ~~Admin authentication.~~ Added in security step 2: admin login, CSRF header, rate limiting and security headers (see README "Admin login"). Webhook mode is still not implemented.
 - Rate limiting and webhook mode.
 - Redemption (simulated checkout).
 - ~~Grant expiry sweep and the reconciler.~~ Added after the MVP (reliability step 1, see README "Health and maintenance").

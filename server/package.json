@@ -10,7 +10,8 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "seed": "tsx src/data/seed.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "setup-admin": "tsx src/scripts/setupAdmin.ts"
   },
   "license": "ISC",
   "type": "module",
