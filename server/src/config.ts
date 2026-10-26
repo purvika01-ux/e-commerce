@@ -25,6 +25,11 @@ const EnvSchema = z.object({
   ADMIN_PASSWORD_HASH: z.preprocess(blankToUndefined, z.string().regex(PASSWORD_HASH_PATTERN, 'must be generated with npm run setup-admin').optional()),
   SESSION_SECRET: z.preprocess(blankToUndefined, z.string().min(32, 'must be at least 32 characters (npm run setup-admin generates one)').optional()),
   SESSION_TTL_HOURS: z.coerce.number().min(1).max(72).default(8),
+  // Optional comma-separated DNS servers (e.g. 8.8.8.8,1.1.1.1) for networks that cannot resolve Atlas SRV records.
+  DNS_SERVERS: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() ? v.split(',').map((s) => s.trim()).filter(Boolean) : []),
+    z.array(z.ipv4().or(z.ipv6())).max(4),
+  ),
   // Set when running behind a hosting proxy so rate limits see the real client IP (true or a hop count).
   TRUST_PROXY: z.preprocess(blankToUndefined, z.union([z.enum(['true', 'false']).transform((v) => v === 'true'), z.coerce.number().int().min(0).max(5)]).default(false)),
 });

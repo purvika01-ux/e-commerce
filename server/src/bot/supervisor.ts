@@ -18,6 +18,7 @@ export interface BotSupervisorOptions {
   logger: Logger;
   baseDelayMs?: number;
   maxDelayMs?: number;
+  conflictMaxDelayMs?: number;
   schedule?: (fn: () => void, ms: number) => { cancel: () => void };
   now?: () => Date;
 }
@@ -40,6 +41,7 @@ function classify(err: unknown): { kind: BotFailureKind; message: string } {
 export function createBotSupervisor(opts: BotSupervisorOptions) {
   const base = opts.baseDelayMs ?? 30_000;
   const max = opts.maxDelayMs ?? 10 * 60_000;
+  const conflictMax = opts.conflictMaxDelayMs ?? 60_000;
   const now = opts.now ?? (() => new Date());
   const schedule =
     opts.schedule ??
@@ -57,7 +59,9 @@ export function createBotSupervisor(opts: BotSupervisorOptions) {
     state.status = 'failed';
     state.lastError = { kind, message, at: now() };
     consecutiveFailures++;
-    const delay = Math.min(max, base * 2 ** (consecutiveFailures - 1));
+    // A 409 is expected while an old and a new deploy overlap (~60 s on Render), so retry it sooner.
+    const cap = kind === 'conflict' ? Math.min(max, conflictMax) : max;
+    const delay = Math.min(cap, base * 2 ** (consecutiveFailures - 1));
     state.nextRetryAt = new Date(now().getTime() + delay);
     opts.logger.error('telegram polling failed; will retry', { kind, message, retryInMs: delay });
     pending = schedule(() => {

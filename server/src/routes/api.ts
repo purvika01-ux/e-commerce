@@ -30,6 +30,8 @@ export interface ServiceStatus {
     nextRetryAt?: Date | null;
   };
   maintenance?: { lastRunAt: Date | null; lastError: string | null; lastResult: Record<string, unknown> | null };
+  /** Deployed commit (from the host's environment), shown so a deploy or rollback can be confirmed. */
+  release?: string | null;
 }
 
 const objectId = z.string().refine((v) => Types.ObjectId.isValid(v), 'must be a valid id');
@@ -104,6 +106,8 @@ export function apiRouter(deps: ApiDeps): Router {
       ai: { mode: s.aiMode, model: s.model },
       telegram: s.telegram,
       maintenance: s.maintenance ?? null,
+      release: s.release ?? null,
+      uptimeSec: Math.round(process.uptime()),
       time: clock.now(),
     });
   });

@@ -7,7 +7,9 @@ import { createMaintenance } from './maintenance/jobs';
 import { ConfigError, loadConfig, loadDotenv } from './config';
 import { createTelegramSender } from './delivery/telegramSender';
 import { createLogger } from './infra/logger';
-import { connectMongo } from './infra/mongo';
+import { connectMongo, connectWithRetry } from './infra/mongo';
+import dns from 'node:dns';
+import { closeHttpServer } from './infra/shutdown';
 import { ensureIndexes } from './models';
 import { createServices } from './services';
 import { Bot } from 'grammy';
@@ -21,13 +23,18 @@ async function main() {
     console.error(err instanceof ConfigError ? err.message : err);
     process.exit(1);
   }
-  const logger = createLogger({ secrets: [config.ANTHROPIC_API_KEY ?? '', config.TELEGRAM_BOT_TOKEN ?? '', config.MONGODB_URI] });
+  const logger = createLogger({
+    secrets: [config.ANTHROPIC_API_KEY ?? '', config.TELEGRAM_BOT_TOKEN ?? '', config.MONGODB_URI, config.SESSION_SECRET ?? '', config.ADMIN_PASSWORD_HASH ?? ''],
+  });
+
+  // Some networks cannot resolve Atlas "mongodb+srv://" records; DNS_SERVERS overrides the resolver.
+  if (config.DNS_SERVERS.length) dns.setServers(config.DNS_SERVERS);
 
   try {
-    await connectMongo(config.MONGODB_URI, logger);
+    await connectWithRetry(() => connectMongo(config.MONGODB_URI, logger), { logger });
     await ensureIndexes();
   } catch {
-    logger.error('Could not connect to MongoDB. Check MONGODB_URI in server/.env and that mongod is running.');
+    logger.error('Could not connect to MongoDB after several attempts. Check MONGODB_URI, Atlas Network Access, and that the cluster is running.');
     process.exit(1);
   }
 
@@ -120,6 +127,7 @@ async function main() {
           nextRetryAt: bot?.nextRetryAt ?? null,
         },
         maintenance: maintenance.state(),
+        release: (process.env.RENDER_GIT_COMMIT ?? process.env.RAILWAY_GIT_COMMIT_SHA)?.slice(0, 7) ?? null,
       };
     },
   });
@@ -132,19 +140,27 @@ async function main() {
     process.exit(1);
   });
 
+  // Graceful shutdown (hosts send SIGTERM, then SIGKILL after ~30 s on Render): stop taking new
+  // work, let in-flight requests finish, then close the database. A hard deadline guarantees exit.
   let shuttingDown = false;
-  const shutdown = async () => {
+  const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    logger.info('shutting down');
+    logger.info('shutting down', { signal });
+    setTimeout(() => {
+      logger.error('shutdown deadline reached; forcing exit');
+      process.exit(1);
+    }, 25_000).unref();
     maintenance.stop();
     await supervisor?.stop();
-    server.close();
-    await mongoose.disconnect();
+    const drained = await closeHttpServer(server, 15_000);
+    if (!drained) logger.warn('in-flight requests did not finish in time; connections closed');
+    await mongoose.disconnect().catch(() => undefined);
+    logger.info('shutdown complete');
     process.exit(0);
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
 void main();

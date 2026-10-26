@@ -142,7 +142,13 @@ On the **Customers** page, the three actions are:
 
 ## Deployment
 
-The app is deployed as one always-on **Railway** service with **MongoDB Atlas**. The root `package.json` provides `build` and `start` for the host. See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for the step-by-step guide: Atlas setup, seeding, admin login, Railway variables and the laptop-to-cloud cut-over.
+The app runs as **one** continuously running Node service: API, dashboard and Telegram bot together. It's deployed on **Render**, with data in **MongoDB Atlas**. The root `package.json` provides `build` (`npm run build`) and `start` (`npm start`); Node 24 is required.
+
+See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for:
+- why it must be a single always-on process;
+- the free-tier limits, including spin-down and how to keep the service awake;
+- the dashboard steps for Atlas and Render;
+- the health-check and rollback procedures.
 
 ## Health and maintenance
 
@@ -152,7 +158,7 @@ The app is deployed as one always-on **Railway** service with **MongoDB Atlas**.
 - the bot's polling status (`polling`, `failed` with the reason, and when it will retry);
 - the last maintenance run.
 
-If polling fails fatally, for example a Telegram 409 because another process is polling the same token, or a revoked token, the error is logged. The API keeps running, and polling is retried with backoff (30 s, doubling, up to 10 min).
+If polling fails fatally, for example a Telegram 409 because another process is polling the same token, or a revoked token, the error is logged. The API keeps running, and polling is retried with backoff (30 s, doubling, up to 10 min). A 409 conflict, which is expected while an old and a new deploy overlap, is retried at least every 60 s. Startup retries the database connection 8 times with backoff before exiting. `/api/health` also reports the deployed commit (`release`) and uptime.
 
 A maintenance job runs every minute:
 
