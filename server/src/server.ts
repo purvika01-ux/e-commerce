@@ -41,7 +41,15 @@ async function main() {
   const ai = config.aiEnabled
     ? createAnthropicAiClient({ apiKey: config.ANTHROPIC_API_KEY!, model: config.CLAUDE_MODEL, timeoutMs: config.AI_TIMEOUT_MS, baseURL: config.OFFERLY_ANTHROPIC_BASE_URL })
     : null;
-  if (!ai) logger.warn('Claude is not configured (set ANTHROPIC_API_KEY in server/.env). Decisions will use the deterministic, validated fallback.');
+  if (!ai) {
+    logger.warn(
+      config.AI_MODE === 'off'
+        ? 'Claude is disabled (AI_MODE=off). Decisions will use the deterministic, validated fallback.'
+        : 'Claude is not configured (set ANTHROPIC_API_KEY in server/.env). Decisions will use the deterministic, validated fallback.',
+    );
+  } else {
+    logger.info('Claude enabled', { model: ai.model });
+  }
 
   const clock = { now: () => new Date() };
   let botUsername: string | null = null;

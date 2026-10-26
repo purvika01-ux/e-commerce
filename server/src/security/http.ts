@@ -3,6 +3,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import type { Clock } from '../decision/orchestrator';
 import { AppError, badRequest } from '../infra/errors';
+import type { Logger } from '../infra/logger';
 import { dummyHashLike, verifyPassword } from './passwords';
 import { createRateLimiter, rateLimit, type RateLimiter } from './rateLimit';
 import { clearedSessionCookie, createSession, destroySession, readCookie, resolveSession, sessionCookie, sessionCookieName, type SessionPolicy } from './session';
@@ -82,7 +83,7 @@ function sameString(a: string, b: string): boolean {
 }
 
 /** /api/auth: login, logout, me. When auth is disabled (local-only use) me reports that. */
-export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: RateLimiter): Router {
+export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: RateLimiter, logger: Logger): Router {
   const r = Router();
   // The limiter reports "not allowed" once the count exceeds max, so max = maxFailures - 1 locks on the Nth failure.
   const failures = createRateLimiter({ windowMs: USERNAME_LOCKOUT.windowMs, max: USERNAME_LOCKOUT.maxFailures - 1 });
@@ -118,7 +119,11 @@ export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: 
       const passwordMatches = await verifyPassword(body.data.password, userMatches ? auth.passwordHash : await dummyHashLike(auth.passwordHash));
       if (!userMatches || !passwordMatches) {
         const hit = failures.hit(key);
-        if (!hit.allowed) lockedUntil.set(key, Date.now() + hit.retryAfterSec * 1000);
+        if (!hit.allowed) {
+          lockedUntil.set(key, Date.now() + hit.retryAfterSec * 1000);
+          // The typed username is not logged (it may be a mistyped password); only whether it matched.
+          logger.warn('admin username locked after repeated failed sign-ins', { event: 'login_locked', usernameMatches: userMatches, ip: req.ip, lockSec: hit.retryAfterSec });
+        }
         throw new AppError('INVALID_CREDENTIALS', 401, 'Incorrect username or password');
       }
       lockedUntil.delete(key);
@@ -126,6 +131,7 @@ export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: 
       const session = await createSession(auth.username, policyOf(auth), clock.now());
       res.setHeader('Set-Cookie', sessionCookie(session.token, { secure: auth.secureCookie, maxAgeMs: auth.sessionTtlMs }));
       res.setHeader('Cache-Control', 'no-store');
+      logger.info('admin signed in', { event: 'login_succeeded', user: auth.username, ip: req.ip });
       res.json({ authRequired: true, user: { username: auth.username, expiresAt: session.expiresAt } });
     },
   );
@@ -134,6 +140,7 @@ export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: 
     if (auth) {
       assertSameSiteRequest(req);
       await destroySession(tokenOf(req, auth), policyOf(auth));
+      logger.info('admin signed out', { event: 'logout', ip: req.ip });
     }
     res.setHeader('Set-Cookie', clearedSessionCookie(auth?.secureCookie ?? false));
     res.status(204).end();

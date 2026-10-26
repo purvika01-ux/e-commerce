@@ -56,6 +56,12 @@ export function createDeliveryService(deps: DeliveryDeps) {
       await Decision.updateOne({ _id: decisionId }, { $push: { validationHistory: { ok: false, phase: 'presend', source: 'presend', violations, checkedAt: now, validatorVersion: 'v1' } } });
       await cancel(decisionId, 'PRESEND_CHECK_FAILED');
       await Delivery.updateOne({ _id: deliveryId }, { status: 'cancelled_precheck', failureReason: violations.map((v) => v.rule).join(', ') });
+      deps.logger.warn('delivery cancelled by pre-send check', {
+        event: 'delivery_cancelled',
+        decisionId,
+        customer: decision.customerRef,
+        rules: violations.map((v) => v.rule),
+      });
       return (await Delivery.findById(deliveryId).lean())!;
     };
 
@@ -121,7 +127,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
         if (err.kind === 'blocked') await TelegramLink.updateOne({ chatId }, { status: 'blocked' });
         await Delivery.updateOne({ _id: deliveryId }, { status: 'failed_permanent', attempts, failureReason: err.kind });
         await cancel(decisionId, `DELIVERY_FAILED_${err.kind.toUpperCase()}`);
-        deps.logger.warn('telegram delivery failed', { decisionId, kind: err.kind });
+        deps.logger.warn('telegram delivery failed', { event: 'delivery_failed', decisionId, customer: decision.customerRef, kind: err.kind, attempts: n });
         return (await Delivery.findById(deliveryId).lean())!;
       }
     }

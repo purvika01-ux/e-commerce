@@ -1,8 +1,33 @@
 # Offerly AI — API Specification (v1, initial)
 
-> Status: **design contract**. Nothing here is implemented yet.
-> Consistent with `docs/ARCHITECTURE.md` (data model §3, pipeline §5, rules §6) and `CLAUDE.md`.
-> Only endpoints needed for the first working version are listed. Later ones are marked **(later)**.
+> Status: this was written as the **design contract before implementation**. The table below shows what is actually implemented (commit `08b828b` and later). Where the code and this document differ, the code and its tests are authoritative.
+
+## Implementation status
+
+| Endpoint | Status | Notes |
+|---|---|---|
+| `GET /api/health` | ✅ Implemented | Public. Adds `release`, `uptimeSec`, bot state and maintenance state. Returns 503 only when the database is down. |
+| `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | ✅ Implemented | **Server-side sessions** (MongoDB `adminsessions`), not the JWT design in §3. The cookie is `offerly_session`, or `__Host-offerly_session` in production. CSRF uses the `X-Requested-With: offerly` header plus an Origin / Sec-Fetch-Site check. |
+| `GET /api/overview` | ✅ Implemented | Dashboard summary (not in the original design) |
+| `GET /api/customers`, `GET /api/customers/:id` | ✅ Implemented | `:id` also returns the current eligibility preview |
+| `POST /api/customers/:id/events` | ❌ Not implemented | Event triggers are still future work |
+| `GET /api/offers`, `POST /api/offers/:id/status` | ✅ Implemented | Activate / pause / archive. Activation is refused if the offer breaks the current rules. |
+| `POST /api/offers`, `PATCH /api/offers/:id` | ❌ Not implemented | Offers come from `server/src/data/catalog.ts` via the seed |
+| `GET /api/rules`, `PUT /api/rules` | ✅ Implemented | `GET` includes plain-language descriptions and the last 10 versions |
+| `GET /api/rules/catalog`, `/history`, `/versions/:version`, `/preview` | ❌ Not implemented | History is part of `GET /api/rules` |
+| `POST /api/recommendations` | ✅ Implemented | `channel`: `none` or `telegram`; `dryRun` for a preview |
+| `GET /api/decisions`, `GET /api/decisions/:id` | ✅ Implemented | |
+| `GET /api/deliveries` | ✅ Implemented | Retry endpoint not implemented |
+| `POST /api/redemptions`, `GET /api/engagement` | ❌ Not implemented | Claims and declines come from Telegram buttons; redemption isn't implemented |
+| `/api/telegram/*` | ❌ Not implemented | Long polling only; no webhook |
+| `/api/analytics/*` | ❌ Not implemented | Summary figures are in `GET /api/overview` |
+
+**Auth on implemented routes:**
+- Everything except `/api/health` and `/api/auth/*` needs a signed-in admin when login is configured.
+- `PUT /api/rules`, `POST /api/offers/:id/status` and `POST /api/recommendations` also need the CSRF checks.
+- Responses: `401` not signed in or session expired, `403` CSRF block, `429` rate limited. See README → Admin login.
+
+---
 
 ## 1. Conventions
 

@@ -11,6 +11,23 @@ Offerly AI decides which offer each customer of an e-commerce platform should re
 
 > All customer data is synthetic. No real purchases or discounts exist.
 
+## Submission
+
+| Item | Value |
+|---|---|
+| Telegram bot | **[@SmartOffersAI_Bot](https://t.me/SmartOffersAI_Bot)** |
+| Repository | `github.com/purvika01-ux/e-commerce` (this repo) |
+| Dashboard | `https://<your-service>.onrender.com`. Fill in after deploying; sign-in is required. |
+| Project instructions | [`CLAUDE.md`](CLAUDE.md) |
+
+**Try it in Telegram:**
+1. Open the bot and press **Start**.
+2. Pick a shopper persona; you're linked to a synthetic customer.
+3. Send **/offer**. You get a personalised offer that has passed the business rules. Its terms come from the offer definition, and its wording from Claude, or from the rule-based fallback if Claude is unavailable.
+4. Tap **Claim** or **Not interested**. `/myoffers` lists offers you hold; `/stop` opts out.
+
+**In the dashboard:** every decision appears in the **Decision log**, with the candidates, the AI's attempts, each validation run and the delivery result.
+
 ## How a decision is made
 
 ```

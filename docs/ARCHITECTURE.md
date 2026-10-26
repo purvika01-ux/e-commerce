@@ -1,6 +1,15 @@
 # Offerly AI — Architecture
 
-> Status: **design document**. No application code exists yet.
+> Status: written as the **design before implementation**. The core design is implemented: modular monolith, data model, eligibility + independent validator, bounded AI (Mode A), atomic ledger, delivery with pre-send recheck, maintenance jobs and the Telegram bot.
+>
+> **Differs from this document:**
+> - Admin login uses **scrypt + server-side MongoDB sessions** (not bcrypt + JWT, §9).
+> - Grant expiry, crash recovery and budget reconciliation run as an in-process maintenance job.
+> - The bot runs under a supervisor.
+>
+> **Not implemented:** event triggers (M11), redemption, the analytics suite and holdout (M13), the `adminAuditLog` collection (admin actions are logged as structured `event` log lines instead), webhooks and email.
+>
+> See `docs/API_SPEC.md` → Implementation status.
 > Consistent with: `Hackathon_2_Brief.pdf` (source of truth), `CLAUDE.md` (guardrails), `docs/PROJECT_PLAN.md` (requirements and phases).
 > Related: `docs/API_SPEC.md` (API contracts), `docs/TESTING.md` (test harness and matrix).
 

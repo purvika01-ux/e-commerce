@@ -1,4 +1,4 @@
-import { Router, type Request } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
 import { describeRule, parseRules, RULE_CATALOG, RULE_TYPES, type RuleSetRecord } from '../domain/rules';
@@ -12,11 +12,14 @@ import { filterEligible } from '../rules/eligibility';
 import { termsSummary } from '../rules/terms';
 import { validateDecision } from '../rules/validator';
 import type { Services } from '../services';
+import { silentLogger, type Logger } from '../infra/logger';
 
 export interface ApiDeps {
   services: Services;
   clock: Clock;
   status: () => ServiceStatus;
+  /** Records admin actions (who changed what). Optional so lightweight test apps can omit it. */
+  logger?: Logger;
 }
 
 export interface ServiceStatus {
@@ -92,6 +95,8 @@ function decisionSummary(d: any) {
 export function apiRouter(deps: ApiDeps): Router {
   const r = Router();
   const { services, clock } = deps;
+  const logger = deps.logger ?? silentLogger;
+  const actor = (res: Response) => (res.locals.user as string | undefined) ?? 'local-admin';
 
   r.get('/health', async (_req, res) => {
     const db = await pingMongo();
@@ -234,6 +239,7 @@ export function apiRouter(deps: ApiDeps): Router {
     const next = { activate: 'active', pause: 'paused', archive: 'archived' }[body.action];
     const updated = await Offer.findOneAndUpdate({ _id: id, status: o.status }, { status: next }, { returnDocument: 'after' }).lean();
     if (!updated) throw conflict('Offer was changed by someone else — reload and try again');
+    logger.info('offer status changed', { event: 'offer_status_changed', user: actor(res), offer: o.code, from: o.status, to: next });
     res.json({ offer: toOfferRecord(updated) });
   });
 
@@ -266,6 +272,13 @@ export function apiRouter(deps: ApiDeps): Router {
       await RuleSet.updateOne({ version: body.expectedVersion }, { active: true });
       throw err;
     }
+    logger.info('business rules updated', {
+      event: 'rules_updated',
+      user: actor(res),
+      fromVersion: body.expectedVersion,
+      toVersion: nextVersion,
+      changeNote: body.changeNote,
+    });
     res.status(201).json({ version: nextVersion });
   });
 
@@ -292,6 +305,17 @@ export function apiRouter(deps: ApiDeps): Router {
       dataOrigin: 'admin',
     });
     const full = result.decision ? await Decision.findById(result.decision._id).lean() : null;
+    if (!result.replayed && !body.dryRun) {
+      logger.info('admin recommendation decided', {
+        event: 'recommendation_decided',
+        user: actor(res),
+        customer: full?.customerRef,
+        status: full?.status,
+        path: full?.path,
+        offer: (full?.offerSnapshot as { code?: string } | null)?.code ?? null,
+        delivery: result.delivery?.status ?? null,
+      });
+    }
     res.status(result.replayed ? 200 : 201).json({
       decision: full ? { ...decisionSummary(full), detail: full } : null,
       delivery: result.delivery,

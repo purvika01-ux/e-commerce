@@ -48,29 +48,35 @@ describe('database startup retry', () => {
 });
 
 describe('graceful HTTP shutdown', () => {
+  /** A server whose handler signals when a request has actually arrived (no timing guesses). */
   async function serverWithSlowRoute(delayMs: number) {
-    const server = http.createServer((_req, res) => setTimeout(() => res.end('done'), delayMs));
+    let arrived!: () => void;
+    const inFlight = new Promise<void>((r) => (arrived = r));
+    const server = http.createServer((_req, res) => {
+      arrived();
+      setTimeout(() => res.end('done'), delayMs);
+    });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     const port = (server.address() as { port: number }).port;
-    return { server, port };
+    return { server, port, inFlight };
   }
 
   it('lets an in-flight request finish before closing', async () => {
-    const { server, port } = await serverWithSlowRoute(150);
+    const { server, port, inFlight } = await serverWithSlowRoute(150);
     const response = fetch(`http://127.0.0.1:${port}/`).then((r) => r.text());
-    await new Promise((r) => setTimeout(r, 30)); // request is now in flight
+    await inFlight;
     const drained = await closeHttpServer(server, 2000);
     expect(drained).toBe(true);
     expect(await response).toBe('done');
   });
 
   it('forces remaining connections closed after the deadline', async () => {
-    const { server, port } = await serverWithSlowRoute(5000);
+    const { server, port, inFlight } = await serverWithSlowRoute(5000);
     const response = fetch(`http://127.0.0.1:${port}/`).then(
       () => 'completed',
       () => 'aborted',
     );
-    await new Promise((r) => setTimeout(r, 30));
+    await inFlight;
     expect(await closeHttpServer(server, 100)).toBe(false);
     expect(await response).toBe('aborted');
   });

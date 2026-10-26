@@ -1,6 +1,14 @@
 # Offerly AI — Test Strategy and Harness
 
-> Status: **test plan**. No tests exist yet. Each milestone in `docs/ARCHITECTURE.md` §10 names the test IDs it must implement.
+> Status: written as the **test plan before implementation**. The implemented suite is **116 tests in 11 files** under `server/tests/` (unit, integration and pipeline), run with `npm --prefix server test`. It covers the plan's core scenarios:
+> - eligibility and validator rules, invalid or fabricated AI output, the fallback;
+> - budget and frequency caps, stacking;
+> - concurrency and idempotency, delivery failures;
+> - auth, CSRF and rate limits, maintenance jobs, logging, deployment behaviour.
+>
+> **Not implemented:** frontend tests (FE-*), the triggers (T-*), redemption (R-*) and analytics (AN-*) tests (those features don't exist), and the live evaluation script.
+>
+> **Database:** tests use a **throwaway database per test file on a local `mongod`**, not `mongodb-memory-server`. Set `MONGODB_TEST_URI` to point elsewhere.
 > Consistent with `CLAUDE.md` §5 and §8 and `docs/ARCHITECTURE.md`.
 
 ## 1. Principles (from CLAUDE.md, restated as test policy)
@@ -12,7 +20,7 @@
    - Fixed seed for the synthetic generator, an injected `FakeClock` and seeded RNG, fixed fixtures.
    - No reliance on wall-clock time or test order.
 3. **Isolated database.**
-   - `mongodb-memory-server` [REC] with a fresh database per test file and collections cleared between tests.
+   - A fresh throwaway database per test file on the local `mongod` (dropped afterwards), with collections cleared between tests.
    - Never the dev or Atlas database.
 4. **Assert on side effects, not just return values.** Every pipeline test checks what was written (decisions, reservations, deliveries) **and what was not** (no send, no counter change).
 5. **Failure paths are first-class.** Every rule has pass, fail and boundary cases.

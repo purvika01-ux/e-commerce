@@ -45,7 +45,7 @@ export function buildApp(deps: ApiDeps & AppOptions) {
 
   // Order matters: per-IP limit → login/logout/me → session required → CSRF header → per-route limits → API.
   app.use('/api', rateLimit(apiLimiter, (req) => `ip:${req.ip}`));
-  app.use('/api/auth', authRouter(auth, deps.clock, loginLimiter));
+  app.use('/api/auth', authRouter(auth, deps.clock, loginLimiter, deps.logger));
   app.use('/api', requireAuth(auth, deps.clock));
   app.use('/api', csrfGuard(auth));
   app.post('/api/recommendations', rateLimit(recommendationLimiter, (req, res) => `rec:${clientKey(req, res)}`));
@@ -61,9 +61,24 @@ export function buildApp(deps: ApiDeps & AppOptions) {
     }
   }
 
-  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     const requestId = res.locals.requestId;
     if (err instanceof AppError) {
+      // Denied requests are security-relevant: record who/what/where (never credentials or bodies).
+      // The dashboard's routine "am I signed in?" check is excluded to keep the log readable.
+      const denied = err.httpStatus === 401 || err.httpStatus === 403 || err.httpStatus === 429;
+      if (denied && req.path !== '/api/auth/me') {
+        deps.logger.warn('request denied', {
+          event: 'access_denied',
+          status: err.httpStatus,
+          code: err.code,
+          method: req.method,
+          path: req.path,
+          ip: req.ip,
+          user: res.locals.user ?? null,
+          requestId,
+        });
+      }
       res.status(err.httpStatus).json({ error: { code: err.code, message: err.message, details: err.details, requestId } });
       return;
     }
