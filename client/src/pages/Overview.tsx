@@ -1,53 +1,102 @@
-import { Activity, Ban, Send, ShieldCheck, Users } from 'lucide-react';
-import type { ReactNode } from 'react';
-import { api, rupees, type Overview as OverviewData } from '../api';
-import { Badge, Card, EmptyState, ErrorState, Meter, PathBadge, SectionTitle, segmentLabel, Skeleton, StatusBadge, useAsync } from '../ui';
+import { Ban, ChevronRight, HandCoins, MousePointerClick, Send, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
+import { api, rupees, when, type Overview as OverviewData } from '../api';
+import { BarList, OutcomeChart } from '../charts';
+import { Badge, Card, EmptyState, ErrorState, KpiTile, Meter, PageHeader, PathBadge, SegmentedControl, segmentLabel, Skeleton, StatusBadge, useAsync } from '../ui';
 
-function Kpi({ label, value, hint, icon }: { label: string; value: number | string; hint?: string; icon: ReactNode }) {
+type Range = '7' | '30' | '90' | 'all';
+const RANGES: { value: Range; label: string }[] = [
+  { value: '7', label: '7 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: 'all', label: 'All time' },
+];
+
+export function Overview({ onOpenDecision }: { onOpenDecision: (id: string) => void }) {
+  const [range, setRange] = useState<Range>('30');
+  const { data, error, loading, reload } = useAsync(() => api.get<OverviewData>(`/overview${range === 'all' ? '' : `?days=${range}`}`), [range]);
+  const rangeText = range === 'all' ? 'all time' : `the last ${range} days`;
+
   return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-ink-500">{label}</p>
-        <span className="text-brand-600">{icon}</span>
-      </div>
-      <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
-      {hint && <p className="mt-1 text-xs text-ink-500">{hint}</p>}
-    </Card>
+    <div>
+      <PageHeader
+        title="Overview"
+        description="How offers are being decided, checked and delivered. Every figure comes from stored decisions and events."
+        actions={<SegmentedControl label="Time range" options={RANGES} value={range} onChange={setRange} />}
+      />
+      {error ? (
+        <ErrorState error={error} onRetry={reload} />
+      ) : !data ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <Skeleton rows={1} className="h-32" />
+          <Skeleton rows={1} className="h-32" />
+          <Skeleton rows={1} className="h-32" />
+          <Skeleton rows={1} className="h-32" />
+          <Skeleton rows={1} className="h-32" />
+        </div>
+      ) : (
+        <OverviewBody data={data} rangeText={rangeText} loading={loading} onOpenDecision={onOpenDecision} />
+      )}
+    </div>
   );
 }
 
-export function Overview({ onOpenDecision }: { onOpenDecision: (id: string) => void }) {
-  const { data, error, loading, reload } = useAsync(() => api.get<OverviewData>('/overview'));
-  if (error) return <ErrorState error={error} onRetry={reload} />;
-  if (loading || !data) return <Skeleton rows={6} />;
-
-  const approved = data.decisions.approved ?? 0;
-  const blocked = (data.decisions.rejected ?? 0) + (data.decisions.cancelled ?? 0);
+function OverviewBody({ data, rangeText, loading, onOpenDecision }: { data: OverviewData; rangeText: string; loading: boolean; onOpenDecision: (id: string) => void }) {
+  const d = data.decisions;
+  const approved = d.approved ?? 0;
+  const blocked = (d.rejected ?? 0) + (d.cancelled ?? 0) + (d.error ?? 0);
+  const byClaude = (data.paths.ai ?? 0) + (data.paths.ai_retry ?? 0);
+  const sent = data.deliveries.sent ?? 0;
+  const notSent = (data.deliveries.failed_permanent ?? 0) + (data.deliveries.cancelled_precheck ?? 0) + (data.deliveries.failed_retryable ?? 0);
+  const claimed = data.engagement.claimed ?? 0;
+  const declined = data.engagement.declined ?? 0;
   const maxSeg = Math.max(...data.segments.map((s) => s.count), 1);
+
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <Kpi label="Synthetic customers" value={data.customers} hint={`${data.telegramLinked} linked to Telegram`} icon={<Users size={18} />} />
-        <Kpi label="Offers approved" value={approved} hint={`${(data.paths.ai ?? 0) + (data.paths.ai_retry ?? 0)} by Claude · ${data.paths.fallback ?? 0} by fallback`} icon={<ShieldCheck size={18} />} />
-        <Kpi label="Delivered on Telegram" value={data.deliveries.sent ?? 0} hint={`${(data.deliveries.failed_permanent ?? 0) + (data.deliveries.cancelled_precheck ?? 0)} not sent`} icon={<Send size={18} />} />
-        <Kpi label="Claimed" value={data.engagement.claimed ?? 0} hint={`${data.engagement.declined ?? 0} not interested`} icon={<Activity size={18} />} />
-        <Kpi label="Blocked by guardrails" value={blocked} hint="Rejected or cancelled before send" icon={<Ban size={18} />} />
+    <div className={`space-y-6 transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <KpiTile label="Offers approved" value={approved} accent="good" icon={<ShieldCheck size={16} aria-hidden />} hint={`${byClaude} by Claude · ${data.paths.fallback ?? 0} by rule-based fallback · ${rangeText}`} />
+        <KpiTile label="Delivered on Telegram" value={sent} accent="teal" icon={<Send size={16} aria-hidden />} hint={notSent ? `${notSent} not sent (failed or cancelled by a final check)` : `None failed · ${rangeText}`} />
+        <KpiTile label="Claims (observed)" value={claimed} accent="violet" icon={<MousePointerClick size={16} aria-hidden />} hint={`${declined} not interested. Button taps by classmates on synthetic profiles — not purchases.`} />
+        <KpiTile
+          label="Available budget"
+          value={rupees(data.budget.availablePaise)}
+          accent="neutral"
+          icon={<HandCoins size={16} aria-hidden />}
+          hint={`of ${rupees(data.budget.totalPaise)} across ${data.budget.liveOffers} live offer${data.budget.liveOffers === 1 ? '' : 's'} · right now`}
+        />
+        <KpiTile label="Blocked by guardrails" value={blocked} accent="bad" icon={<Ban size={16} aria-hidden />} hint={`Rejected, cancelled before send or errored — never delivered · ${rangeText}`} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <SectionTitle title="Recent decisions" subtitle="Every decision is validated independently before anything is sent." />
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Card className="xl:col-span-2" title="Decision outcomes" subtitle={`Per day, last ${data.daily.days} days (India time). No offer means no offer was allowed or needed.`}>
+          <OutcomeChart points={data.daily.points} />
+        </Card>
+        <Card title="Customer segments" subtitle={`${data.customers} synthetic customers · derived from behaviour`}>
+          <BarList items={data.segments.map((s) => ({ key: s.segment, label: segmentLabel(s.segment), value: s.count }))} />
+          <p className="mt-4 text-[0.75rem] text-ink-3">
+            {data.telegramLinked} linked to a Telegram chat · bar length relative to the largest segment ({maxSeg}).
+          </p>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-5">
+        <Card className="xl:col-span-3" title="Recent decisions" subtitle="Newest first · open one for its full audit trail" padded={false}>
           {data.recentDecisions.length === 0 ? (
-            <EmptyState title="No decisions yet" hint="Open Customers, pick someone and preview or send a recommendation." />
+            <div className="p-5">
+              <EmptyState title="No decisions yet" hint="Open Customers, pick a shopper and preview or decide an offer — or ask a classmate to send /offer to the bot." />
+            </div>
           ) : (
-            <ul className="divide-y divide-slate-100">
-              {data.recentDecisions.map((d) => (
-                <li key={d.id}>
-                  <button onClick={() => onOpenDecision(d.id)} className="flex w-full flex-wrap items-center gap-2 py-2.5 text-left hover:bg-slate-50">
-                    <span className="w-24 font-mono text-xs text-ink-500">{d.customerRef}</span>
-                    <StatusBadge status={d.status} />
-                    <PathBadge path={d.path} />
-                    <span className="flex-1 truncate text-sm">{d.offer ? d.offer.terms : '—'}</span>
+            <ul className="divide-y divide-line">
+              {data.recentDecisions.map((dec) => (
+                <li key={dec.id}>
+                  <button onClick={() => onOpenDecision(dec.id)} className="group flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3 text-left transition-colors hover:bg-surface-2 sm:px-6">
+                    <span className="w-24 font-mono text-[0.78rem] text-ink-3">{dec.customerRef}</span>
+                    <StatusBadge status={dec.status} />
+                    <PathBadge path={dec.path} />
+                    <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{dec.offer ? dec.offer.terms : '—'}</span>
+                    <span className="text-[0.75rem] text-ink-3">{when(dec.decidedAt)}</span>
+                    <ChevronRight size={15} className="text-ink-3 transition-transform group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </li>
               ))}
@@ -55,40 +104,32 @@ export function Overview({ onOpenDecision }: { onOpenDecision: (id: string) => v
           )}
         </Card>
 
-        <Card>
-          <SectionTitle title="Customer segments" subtitle="Derived from synthetic behaviour" />
-          <ul className="space-y-2.5">
-            {data.segments.map((s) => (
-              <li key={s.segment} className="text-sm">
-                <div className="mb-1 flex justify-between">
-                  <span>{segmentLabel(s.segment)}</span>
-                  <span className="tabular-nums text-ink-500">{s.count}</span>
-                </div>
-                <Meter value={s.count} max={maxSeg} />
-              </li>
-            ))}
-          </ul>
+        <Card className="xl:col-span-2" title="Offer budgets" subtitle="Committed = reserved for issued offers + redeemed">
+          {data.offers.length === 0 ? (
+            <EmptyState title="No offers" hint="Create one on the Offers page." />
+          ) : (
+            <ul className="space-y-4">
+              {data.offers
+                .filter((o) => o.status !== 'archived')
+                .map((o) => {
+                  const used = o.budget.reservedPaise + o.budget.redeemedPaise;
+                  return (
+                    <li key={o.code}>
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-sm text-ink-2">{o.name}</span>
+                        <Badge tone={o.status === 'active' ? 'good' : o.status === 'expired' ? 'bad' : 'neutral'}>{o.status}</Badge>
+                      </div>
+                      <Meter value={used} max={o.budget.totalPaise} label={`${o.name} budget used`} />
+                      <p className="mt-1 text-[0.75rem] text-ink-3 tabular-nums">
+                        {rupees(used)} of {rupees(o.budget.totalPaise)} · {o.usage.grantsIssued}/{o.usage.maxGrants} issued
+                      </p>
+                    </li>
+                  );
+                })}
+            </ul>
+          )}
         </Card>
       </div>
-
-      <Card>
-        <SectionTitle title="Offer budgets" subtitle="Reserved budget is worst-case liability for issued offers" />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {data.offers.map((o) => (
-            <div key={o.code} className="rounded-xl border border-slate-200 p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="truncate text-sm font-medium">{o.name}</span>
-                <Badge tone={o.status === 'active' ? 'green' : o.status === 'expired' ? 'red' : 'slate'}>{o.status}</Badge>
-              </div>
-              <Meter value={o.budget.reservedPaise + o.budget.redeemedPaise} max={o.budget.totalPaise} tone="amber" />
-              <p className="mt-1.5 text-xs text-ink-500">
-                {rupees(o.budget.reservedPaise + o.budget.redeemedPaise)} of {rupees(o.budget.totalPaise)} · {o.usage.grantsIssued}/{o.usage.maxGrants} issued
-              </p>
-            </div>
-          ))}
-        </div>
-      </Card>
-      <p className="text-xs text-ink-500">{data.dataNotice}</p>
     </div>
   );
 }

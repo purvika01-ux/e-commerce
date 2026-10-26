@@ -62,6 +62,8 @@ describe('unauthenticated and direct API access', () => {
       ['post', '/api/recommendations'],
       ['put', '/api/rules'],
       ['post', `/api/offers/${offerId}/status`],
+      ['post', '/api/offers'],
+      ['patch', `/api/offers/${offerId}`],
     ];
     for (const [method, path] of routes) {
       const res = await (request(app) as any)[method](path).set(CSRF).set('Idempotency-Key', key()).send({ customerId: fx.customers.atRisk, action: 'pause' });

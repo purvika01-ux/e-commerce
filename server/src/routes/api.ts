@@ -2,7 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
 import { describeRule, parseRules, RULE_CATALOG, RULE_TYPES, type RuleSetRecord } from '../domain/rules';
-import { SEGMENTS, type OfferRecord } from '../domain/types';
+import { estimateCostPaise, SEGMENTS, type OfferRecord } from '../domain/types';
+import { OfferCreateSchema, OfferUpdateSchema, VERSIONED_FIELDS } from '../domain/offerInput';
 import { computeContactStats } from '../decision/ledger';
 import { loadActiveRuleSet, type Clock } from '../decision/orchestrator';
 import { AppError, badRequest, conflict, notFound } from '../infra/errors';
@@ -117,38 +118,82 @@ export function apiRouter(deps: ApiDeps): Router {
     });
   });
 
-  r.get('/overview', async (_req, res) => {
-    const [customers, segments, offers, decisionsByStatus, decisionsByPath, deliveriesByStatus, linked, engagement, recent] = await Promise.all([
+  r.get('/overview', async (req, res) => {
+    // Optional time range (days back from now). Without it, totals are all-time, as before.
+    const q = parse(z.object({ days: z.enum(['7', '30', '90']).optional() }), req.query);
+    const now = clock.now();
+    const days = q.days ? Number(q.days) : null;
+    const since = days ? new Date(now.getTime() - days * 86_400_000) : null;
+    const decisionMatch: Record<string, unknown> = { preview: { $ne: true }, ...(since ? { decidedAt: { $gte: since } } : {}) };
+    const createdMatch = since ? { createdAt: { $gte: since } } : {};
+    const occurredMatch = since ? { occurredAt: { $gte: since } } : {};
+    // Chart window: the selected range, or the last 30 days for all-time.
+    const chartDays = days ?? 30;
+    const chartSince = new Date(now.getTime() - chartDays * 86_400_000);
+
+    const [customers, segments, offers, decisionsByStatus, decisionsByPath, deliveriesByStatus, linked, engagement, recent, daily] = await Promise.all([
       Customer.countDocuments(),
       Customer.aggregate([{ $group: { _id: '$segment', count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
       Offer.find().lean(),
-      Decision.aggregate([{ $match: { preview: { $ne: true } } }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
-      Decision.aggregate([{ $match: { status: { $in: ['approved', 'cancelled'] } } }, { $group: { _id: '$path', count: { $sum: 1 } } }]),
-      Delivery.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+      Decision.aggregate([{ $match: decisionMatch }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
+      Decision.aggregate([{ $match: { ...decisionMatch, status: { $in: ['approved', 'cancelled'] } } }, { $group: { _id: '$path', count: { $sum: 1 } } }]),
+      Delivery.aggregate([{ $match: createdMatch }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
       TelegramLink.countDocuments({ status: 'active' }),
-      EngagementEvent.aggregate([{ $group: { _id: '$type', count: { $sum: 1 } } }]),
+      EngagementEvent.aggregate([{ $match: occurredMatch }, { $group: { _id: '$type', count: { $sum: 1 } } }]),
       Decision.find({ preview: { $ne: true } }).sort({ createdAt: -1 }).limit(8).lean(),
+      Decision.aggregate([
+        { $match: { preview: { $ne: true }, decidedAt: { $gte: chartSince } } },
+        {
+          $group: {
+            _id: { day: { $dateToString: { format: '%Y-%m-%d', date: '$decidedAt', timezone: 'Asia/Kolkata' } }, status: '$status' },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
     const toMap = (rows: { _id: string; count: number }[]) => Object.fromEntries(rows.map((x) => [x._id, x.count]));
-    const now = clock.now();
+
+    // Daily outcome series with every day present (zeros included), in IST.
+    const dayKey = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    const series = new Map<string, { date: string; approved: number; noOffer: number; blocked: number }>();
+    for (let i = chartDays - 1; i >= 0; i--) {
+      const key = dayKey(new Date(now.getTime() - i * 86_400_000));
+      series.set(key, { date: key, approved: 0, noOffer: 0, blocked: 0 });
+    }
+    for (const row of daily as { _id: { day: string; status: string }; count: number }[]) {
+      const point = series.get(row._id.day);
+      if (!point) continue;
+      if (row._id.status === 'approved') point.approved += row.count;
+      else if (row._id.status === 'no_offer') point.noOffer += row.count;
+      else if (['rejected', 'cancelled', 'error'].includes(row._id.status)) point.blocked += row.count;
+    }
+
+    const offerRecords = offers.map(toOfferRecord);
+    const live = offerRecords.filter((o) => o.status === 'active' && o.validTo > now);
+    const budget = {
+      totalPaise: live.reduce((s, o) => s + o.budget.totalPaise, 0),
+      committedPaise: live.reduce((s, o) => s + o.budget.reservedPaise + o.budget.redeemedPaise, 0),
+      liveOffers: live.length,
+    };
+
     res.json({
+      range: days ? `${days}d` : 'all',
       customers,
       segments: segments.map((s) => ({ segment: s._id, count: s.count })),
-      offers: offers.map((o) => {
-        const rec = toOfferRecord(o);
-        return {
-          code: rec.code,
-          name: rec.name,
-          status: rec.validTo <= now ? 'expired' : rec.status,
-          budget: rec.budget,
-          usage: rec.usage,
-        };
-      }),
+      offers: offerRecords.map((rec) => ({
+        code: rec.code,
+        name: rec.name,
+        status: rec.validTo <= now ? 'expired' : rec.status,
+        budget: rec.budget,
+        usage: rec.usage,
+      })),
+      budget: { ...budget, availablePaise: budget.totalPaise - budget.committedPaise },
       decisions: toMap(decisionsByStatus),
       paths: toMap(decisionsByPath),
       deliveries: toMap(deliveriesByStatus),
       engagement: toMap(engagement),
       telegramLinked: linked,
+      daily: { days: chartDays, timezone: 'Asia/Kolkata', points: [...series.values()] },
       recentDecisions: recent.map(decisionSummary),
       dataNotice: 'All customers are synthetic. Engagement comes from classmates using synthetic profiles; it is descriptive, not causal.',
     });
@@ -161,15 +206,26 @@ export function apiRouter(deps: ApiDeps): Router {
         q: z.string().max(40).optional(),
         page: z.coerce.number().int().min(1).default(1),
         pageSize: z.coerce.number().int().min(1).max(100).default(50),
+        sort: z.enum(['ref', 'name', 'churn', 'buyProbability', 'spend', 'recency']).default('ref'),
+        order: z.enum(['asc', 'desc']).default('asc'),
       }),
       req.query,
     );
+    const sortField: Record<string, string> = {
+      ref: 'externalRef',
+      name: 'displayName',
+      churn: 'features.churnRisk',
+      buyProbability: 'features.purchaseProbability7d',
+      spend: 'features.monetary90dPaise',
+      recency: 'features.recencyDays',
+    };
+    const direction = q.order === 'asc' ? 1 : -1;
     const filter: Record<string, unknown> = {};
     if (q.segment) filter.segment = q.segment;
     if (q.q) filter.$or = [{ externalRef: { $regex: `^${q.q.replace(/[^A-Za-z0-9-]/g, '')}`, $options: 'i' } }, { displayName: { $regex: q.q.replace(/[^A-Za-z ]/g, ''), $options: 'i' } }];
     const [items, total] = await Promise.all([
       Customer.find(filter, { features: 1, externalRef: 1, displayName: 1, segment: 1, persona: 1, rewardPoints: 1, telegramLinked: 1, optedOut: 1 })
-        .sort({ externalRef: 1 })
+        .sort({ [sortField[q.sort]]: direction, externalRef: 1 })
         .skip((q.page - 1) * q.pageSize)
         .limit(q.pageSize)
         .lean(),
@@ -210,16 +266,154 @@ export function apiRouter(deps: ApiDeps): Router {
     const now = clock.now();
     const ruleSet = await loadActiveRuleSet();
     const offers = (await Offer.find().sort({ priority: -1 }).lean()).map(toOfferRecord);
-    res.json({
-      items: offers.map((o) => ({
-        ...o,
-        terms: o.terms,
-        termsSummary: termsSummary(o),
-        isExpired: o.validTo <= now,
-        remainingBudgetPaise: o.budget.totalPaise - o.budget.reservedPaise - o.budget.redeemedPaise,
-        ruleIssues: offerRuleIssues(o, ruleSet, now),
-      })),
-    });
+    res.json({ items: offers.map((o) => offerView(o, ruleSet, now)) });
+  });
+
+  const offerView = (o: OfferRecord, ruleSet: RuleSetRecord, now: Date) => ({
+    ...o,
+    termsSummary: termsSummary(o),
+    isExpired: o.validTo <= now,
+    remainingBudgetPaise: o.budget.totalPaise - o.budget.reservedPaise - o.budget.redeemedPaise,
+    ruleIssues: offerRuleIssues(o, ruleSet, now),
+  });
+
+  // Create: always starts as a draft, so nothing can be offered until an admin activates it (activation re-checks the rules).
+  r.post('/offers', async (req, res) => {
+    const input = parse(OfferCreateSchema, req.body);
+    const now = clock.now();
+    try {
+      const created = await Offer.create({
+        code: input.code,
+        name: input.name,
+        description: input.description,
+        status: 'draft',
+        version: 1,
+        type: input.type,
+        terms: input.terms,
+        eligibility: input.eligibility,
+        validFrom: input.validFrom,
+        validTo: input.validTo,
+        grantValidityHours: input.grantValidityHours,
+        priority: input.priority,
+        estimatedCostPaise: estimateCostPaise(input.type, input.terms),
+        stackable: input.stackable,
+        budget: { totalPaise: input.budgetTotalPaise, reservedPaise: 0, redeemedPaise: 0 },
+        usage: { maxGrants: input.maxGrants, grantsIssued: 0, maxGrantsPerCustomer: input.maxGrantsPerCustomer, redemptions: 0 },
+      });
+      const offer = toOfferRecord(created.toObject());
+      logger.info('offer created', { event: 'offer_created', user: actor(res), offer: offer.code, type: offer.type });
+      res.status(201).json({ offer: offerView(offer, await loadActiveRuleSet(), now) });
+    } catch (err: any) {
+      if (err?.code === 11000) throw conflict(`An offer with code ${input.code} already exists`, 'DUPLICATE_CODE');
+      throw err;
+    }
+  });
+
+  /**
+   * Edit: optimistic concurrency on version. Changing terms, eligibility, validity, budget or limits
+   * bumps the version — issued grants keep the snapshot they were promised, and approved-but-unsent
+   * decisions are cancelled by the pre-send check. An active offer may never be edited into breaking the rules.
+   */
+  r.patch('/offers/:id', async (req, res) => {
+    const id = idParam(req);
+    const body = parse(OfferUpdateSchema, req.body);
+    const { expectedVersion, ...changes } = body;
+    if (!Object.keys(changes).length) throw badRequest('Nothing to change');
+    const doc = await Offer.findById(id).lean();
+    if (!doc) throw notFound('Offer');
+    const current = toOfferRecord(doc);
+    if (current.status === 'archived') throw conflict('Archived offers cannot be edited');
+    if (current.version !== expectedVersion) throw conflict('This offer was changed by someone else — reload and try again', 'STALE_VERSION');
+
+    const merged = {
+      code: current.code,
+      name: changes.name ?? current.name,
+      description: changes.description ?? current.description,
+      type: changes.type ?? current.type,
+      terms: changes.terms ?? current.terms,
+      eligibility: changes.eligibility ?? current.eligibility,
+      validFrom: changes.validFrom ?? current.validFrom,
+      validTo: changes.validTo ?? current.validTo,
+      grantValidityHours: changes.grantValidityHours ?? current.grantValidityHours,
+      priority: changes.priority ?? current.priority,
+      stackable: changes.stackable ?? current.stackable,
+      budgetTotalPaise: changes.budgetTotalPaise ?? current.budget.totalPaise,
+      maxGrants: changes.maxGrants ?? current.usage.maxGrants,
+      maxGrantsPerCustomer: changes.maxGrantsPerCustomer ?? current.usage.maxGrantsPerCustomer,
+    };
+    const checked = parse(OfferCreateSchema, merged);
+    const now = clock.now();
+    const committed = current.budget.reservedPaise + current.budget.redeemedPaise;
+    if (checked.budgetTotalPaise < committed) {
+      throw conflict(`Budget cannot go below the ₹${Math.ceil(committed / 100)} already committed to issued offers`, 'BUDGET_BELOW_COMMITTED');
+    }
+    if (checked.maxGrants < current.usage.grantsIssued) {
+      throw conflict(`Usage limit cannot go below the ${current.usage.grantsIssued} offers already issued`, 'USAGE_BELOW_ISSUED');
+    }
+
+    const nextRecord: OfferRecord = {
+      ...current,
+      name: checked.name,
+      description: checked.description,
+      type: checked.type,
+      terms: checked.terms,
+      eligibility: checked.eligibility,
+      validFrom: checked.validFrom,
+      validTo: checked.validTo,
+      grantValidityHours: checked.grantValidityHours,
+      priority: checked.priority,
+      stackable: checked.stackable,
+      estimatedCostPaise: estimateCostPaise(checked.type, checked.terms),
+      budget: { ...current.budget, totalPaise: checked.budgetTotalPaise },
+      usage: { ...current.usage, maxGrants: checked.maxGrants, maxGrantsPerCustomer: checked.maxGrantsPerCustomer },
+    };
+    const ruleSet = await loadActiveRuleSet();
+    if (current.status === 'active') {
+      if (nextRecord.validTo <= now) throw new AppError('BUSINESS_RULE_VIOLATION', 422, 'An active offer cannot be given an end date in the past — pause it instead');
+      const issues = offerRuleIssues(nextRecord, ruleSet, now);
+      if (issues.length) throw new AppError('BUSINESS_RULE_VIOLATION', 422, 'This change would make an active offer break the business rules', issues);
+    }
+
+    const before = { ...merged, type: current.type, terms: current.terms, eligibility: current.eligibility, validFrom: current.validFrom, validTo: current.validTo, grantValidityHours: current.grantValidityHours, stackable: current.stackable, budgetTotalPaise: current.budget.totalPaise, maxGrants: current.usage.maxGrants, maxGrantsPerCustomer: current.usage.maxGrantsPerCustomer };
+    const changedVersioned = VERSIONED_FIELDS.filter((f) => JSON.stringify((before as any)[f]) !== JSON.stringify((checked as any)[f]));
+    const set: Record<string, unknown> = {
+      name: checked.name,
+      description: checked.description,
+      priority: checked.priority,
+      type: checked.type,
+      terms: checked.terms,
+      eligibility: checked.eligibility,
+      validFrom: checked.validFrom,
+      validTo: checked.validTo,
+      grantValidityHours: checked.grantValidityHours,
+      stackable: checked.stackable,
+      estimatedCostPaise: nextRecord.estimatedCostPaise,
+      'budget.totalPaise': checked.budgetTotalPaise,
+      'usage.maxGrants': checked.maxGrants,
+      'usage.maxGrantsPerCustomer': checked.maxGrantsPerCustomer,
+    };
+    const update: Record<string, unknown> = { $set: set };
+    if (changedVersioned.length) update.$inc = { version: 1 };
+    // Atomic: the version and status must still match, and counters may not have overtaken the new limits.
+    const updated = await Offer.findOneAndUpdate(
+      {
+        _id: id,
+        version: expectedVersion,
+        status: current.status,
+        $expr: {
+          $and: [
+            { $lte: [{ $add: ['$budget.reservedPaise', '$budget.redeemedPaise'] }, checked.budgetTotalPaise] },
+            { $lte: ['$usage.grantsIssued', checked.maxGrants] },
+          ],
+        },
+      },
+      update,
+      { returnDocument: 'after' },
+    ).lean();
+    if (!updated) throw conflict('This offer changed while you were editing — reload and try again', 'STALE_VERSION');
+    const offer = toOfferRecord(updated);
+    logger.info('offer updated', { event: 'offer_updated', user: actor(res), offer: offer.code, fromVersion: expectedVersion, toVersion: offer.version, versionedChanges: changedVersioned });
+    res.json({ offer: offerView(offer, ruleSet, now) });
   });
 
   r.post('/offers/:id/status', async (req, res) => {
@@ -326,17 +520,32 @@ export function apiRouter(deps: ApiDeps): Router {
   r.get('/decisions', async (req, res) => {
     const q = parse(
       z.object({
-        limit: z.coerce.number().int().min(1).max(200).default(50),
+        // `limit` is kept for older callers; `page` + `pageSize` paginate.
+        limit: z.coerce.number().int().min(1).max(200).optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        pageSize: z.coerce.number().int().min(1).max(100).optional(),
         status: z.enum(['no_offer', 'rejected', 'approved', 'dry_run', 'cancelled', 'error', 'pending']).optional(),
+        path: z.enum(['ai', 'ai_retry', 'fallback', 'none']).optional(),
         customerId: objectId.optional(),
+        q: z.string().max(40).optional(),
+        days: z.enum(['7', '30', '90']).optional(),
+        sort: z.enum(['newest', 'oldest']).default('newest'),
       }),
       req.query,
     );
+    const pageSize = q.pageSize ?? q.limit ?? 50;
     const filter: Record<string, unknown> = { preview: { $ne: true } };
     if (q.status) filter.status = q.status;
+    if (q.path) filter.path = q.path;
     if (q.customerId) filter.customerId = q.customerId;
-    const items = await Decision.find(filter).sort({ createdAt: -1 }).limit(q.limit).lean();
-    res.json({ items: items.map(decisionSummary) });
+    if (q.q) filter.customerRef = { $regex: `^${q.q.replace(/[^A-Za-z0-9-]/g, '')}`, $options: 'i' };
+    if (q.days) filter.decidedAt = { $gte: new Date(clock.now().getTime() - Number(q.days) * 86_400_000) };
+    const order = q.sort === 'oldest' ? 1 : -1;
+    const [items, total] = await Promise.all([
+      Decision.find(filter).sort({ decidedAt: order, _id: order }).skip((q.page - 1) * pageSize).limit(pageSize).lean(),
+      Decision.countDocuments(filter),
+    ]);
+    res.json({ items: items.map(decisionSummary), page: q.page, pageSize, total });
   });
 
   r.get('/decisions/:id', async (req, res) => {

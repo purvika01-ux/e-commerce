@@ -8,15 +8,15 @@
 |---|---|---|
 | `GET /api/health` | ✅ Implemented | Public. Adds `release`, `uptimeSec`, bot state and maintenance state. Returns 503 only when the database is down. |
 | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` | ✅ Implemented | **Server-side sessions** (MongoDB `adminsessions`), not the JWT design in §3. The cookie is `offerly_session`, or `__Host-offerly_session` in production. CSRF uses the `X-Requested-With: offerly` header plus an Origin / Sec-Fetch-Site check. |
-| `GET /api/overview` | ✅ Implemented | Dashboard summary (not in the original design) |
-| `GET /api/customers`, `GET /api/customers/:id` | ✅ Implemented | `:id` also returns the current eligibility preview |
+| `GET /api/overview` | ✅ Implemented | Dashboard summary (not in the original design). Optional `days` = 7, 30 or 90 (omit it for all time). Also returns `range`, `budget` (`totalPaise`, `committedPaise`, `availablePaise`, `liveOffers`; current state of live offers) and `daily` (per-day `approved` / `noOffer` / `blocked` counts in Asia/Kolkata days; the last 30 days when no range is given). |
+| `GET /api/customers`, `GET /api/customers/:id` | ✅ Implemented | `:id` also returns the current eligibility preview. The list also takes `sort` (`ref`, `name`, `churn`, `buyProbability`, `spend`, `recency`) and `order` (`asc`, `desc`). |
 | `POST /api/customers/:id/events` | ❌ Not implemented | Event triggers are still future work |
 | `GET /api/offers`, `POST /api/offers/:id/status` | ✅ Implemented | Activate / pause / archive. Activation is refused if the offer breaks the current rules. |
-| `POST /api/offers`, `PATCH /api/offers/:id` | ❌ Not implemented | Offers come from `server/src/data/catalog.ts` via the seed |
+| `POST /api/offers`, `PATCH /api/offers/:id` | ✅ Implemented | See §5, with these differences. A new offer is always a **draft** and may break the current rules: they show as rule issues, and activation is refused until they are fixed. `PATCH` also returns 409 `BUDGET_BELOW_COMMITTED` / `USAGE_BELOW_ISSUED`, and 422 `BUSINESS_RULE_VIOLATION` when an **active** offer would break the rules. Cosmetic edits (name, description, priority) keep the version. Approved-but-unsent decisions keep their `offerSnapshot`; the pre-send check cancels them with `OFFER_CHANGED`. |
 | `GET /api/rules`, `PUT /api/rules` | ✅ Implemented | `GET` includes plain-language descriptions and the last 10 versions |
 | `GET /api/rules/catalog`, `/history`, `/versions/:version`, `/preview` | ❌ Not implemented | History is part of `GET /api/rules` |
 | `POST /api/recommendations` | ✅ Implemented | `channel`: `none` or `telegram`; `dryRun` for a preview |
-| `GET /api/decisions`, `GET /api/decisions/:id` | ✅ Implemented | |
+| `GET /api/decisions`, `GET /api/decisions/:id` | ✅ Implemented | The list takes `status`, `path`, `q` (customer ref prefix), `days`, `sort` (`newest` or `oldest`), `page` and `pageSize`, and returns `{ items, page, pageSize, total }`. The older `limit` parameter still works. |
 | `GET /api/deliveries` | ✅ Implemented | Retry endpoint not implemented |
 | `POST /api/redemptions`, `GET /api/engagement` | ❌ Not implemented | Claims and declines come from Telegram buttons; redemption isn't implemented |
 | `/api/telegram/*` | ❌ Not implemented | Long polling only; no webhook |
@@ -24,7 +24,7 @@
 
 **Auth on implemented routes:**
 - Everything except `/api/health` and `/api/auth/*` needs a signed-in admin when login is configured.
-- `PUT /api/rules`, `POST /api/offers/:id/status` and `POST /api/recommendations` also need the CSRF checks.
+- `PUT /api/rules`, `POST /api/offers`, `PATCH /api/offers/:id`, `POST /api/offers/:id/status` and `POST /api/recommendations` also need the CSRF checks.
 - Responses: `401` not signed in or session expired, `403` CSRF block, `429` rate limited. See README → Admin login.
 
 ---

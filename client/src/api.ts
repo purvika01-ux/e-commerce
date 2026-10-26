@@ -36,6 +36,7 @@ export const api = {
   get: <T>(path: string) => call<T>(path),
   post: <T>(path: string, body: unknown, headers?: Record<string, string>) => call<T>(path, { method: 'POST', body: JSON.stringify(body), headers }),
   put: <T>(path: string, body: unknown) => call<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
+  patch: <T>(path: string, body: unknown) => call<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
 };
 
 export const rupees = (paise: number) => `₹${Math.round(paise / 100).toLocaleString('en-IN')}`;
@@ -73,16 +74,26 @@ export interface DecisionSummary {
 }
 
 export interface Overview {
+  range: '7d' | '30d' | '90d' | 'all';
   customers: number;
   segments: { segment: string; count: number }[];
   offers: { code: string; name: string; status: string; budget: { totalPaise: number; reservedPaise: number; redeemedPaise: number }; usage: { maxGrants: number; grantsIssued: number } }[];
+  budget: { totalPaise: number; committedPaise: number; availablePaise: number; liveOffers: number };
   decisions: Record<string, number>;
   paths: Record<string, number>;
   deliveries: Record<string, number>;
   engagement: Record<string, number>;
   telegramLinked: number;
+  daily: { days: number; timezone: string; points: { date: string; approved: number; noOffer: number; blocked: number }[] };
   recentDecisions: DecisionSummary[];
   dataNotice: string;
+}
+
+export interface Paged<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
 }
 
 export interface CustomerRow {
@@ -106,23 +117,46 @@ export interface CustomerDetail {
   decisions: DecisionSummary[];
 }
 
+export type OfferType = 'percent_off' | 'flat_off' | 'free_shipping' | 'bonus_points';
+
+export interface OfferTerms {
+  percentOff?: number;
+  maxDiscountPaise?: number;
+  flatOffPaise?: number;
+  bonusPoints?: number;
+  minOrderPaise: number;
+  categories?: string[];
+}
+
+export interface OfferEligibility {
+  segments?: string[];
+  minChurnRisk?: number;
+  maxPurchaseProbability?: number;
+  requiresOpenCart?: boolean;
+  newCustomersOnly?: boolean;
+  minRewardPoints?: number;
+}
+
 export interface OfferItem {
   id: string;
   code: string;
   name: string;
   description: string;
-  status: string;
+  status: 'draft' | 'active' | 'paused' | 'archived';
   version: number;
-  type: string;
+  type: OfferType;
+  terms: OfferTerms;
   termsSummary: string;
-  eligibility: Record<string, unknown>;
+  eligibility: OfferEligibility;
   validFrom: string;
   validTo: string;
   isExpired: boolean;
+  grantValidityHours: number;
   priority: number;
+  stackable: boolean;
   estimatedCostPaise: number;
   budget: { totalPaise: number; reservedPaise: number; redeemedPaise: number };
-  usage: { maxGrants: number; grantsIssued: number };
+  usage: { maxGrants: number; grantsIssued: number; maxGrantsPerCustomer: number };
   remainingBudgetPaise: number;
   ruleIssues: Violation[];
 }
@@ -134,4 +168,17 @@ export interface RuleItem {
   params: Record<string, unknown>;
   description: string;
   help: string;
+}
+
+export const SEGMENTS = ['champion', 'loyal', 'promising', 'new', 'at_risk', 'hibernating', 'price_sensitive', 'window_shopper'] as const;
+export const CATEGORIES = ['electronics', 'fashion', 'grocery', 'home', 'beauty'] as const;
+
+/** Maps a server validation error ({ path, message }[]) to a field → message record for inline errors. */
+export function fieldErrors(err: unknown): Record<string, string> {
+  if (!(err instanceof ApiError) || !Array.isArray(err.details)) return {};
+  const out: Record<string, string> = {};
+  for (const d of err.details as { path?: string; message?: string; rule?: string }[]) {
+    if (d.path && d.message && !out[d.path]) out[d.path] = d.message;
+  }
+  return out;
 }
