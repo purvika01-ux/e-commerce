@@ -27,7 +27,11 @@ const SUBTITLES: Record<Tab, string> = {
   decisions: 'Full audit trail of every decision',
 };
 
-type AuthState = { state: 'checking' } | { state: 'signed_out' } | { state: 'ready'; user: string | null } | { state: 'error'; error: ApiError };
+type AuthState =
+  | { state: 'checking' }
+  | { state: 'signed_out'; expired?: boolean }
+  | { state: 'ready'; user: string | null }
+  | { state: 'error'; error: ApiError };
 
 /** Checks the session first; shows the sign-in screen when the server requires a login. */
 export default function App() {
@@ -45,7 +49,7 @@ export default function App() {
 
   useEffect(() => {
     void check();
-    const onExpired = () => setAuth({ state: 'signed_out' });
+    const onExpired = () => setAuth({ state: 'signed_out', expired: true });
     window.addEventListener(UNAUTHENTICATED_EVENT, onExpired);
     return () => window.removeEventListener(UNAUTHENTICATED_EVENT, onExpired);
   }, [check]);
@@ -57,7 +61,7 @@ export default function App() {
 
   if (auth.state === 'checking') return <div className="grid min-h-full place-items-center"><Loading label="Starting Offerly AI…" /></div>;
   if (auth.state === 'error') return <div className="mx-auto max-w-md p-8"><ErrorState error={auth.error} onRetry={check} /></div>;
-  if (auth.state === 'signed_out') return <Login onSignedIn={check} />;
+  if (auth.state === 'signed_out') return <Login onSignedIn={check} notice={auth.expired ? 'Your session has ended. Please sign in again.' : undefined} />;
   return <Dashboard user={auth.user} onLogout={logout} />;
 }
 

@@ -80,30 +80,59 @@ Never commit `server/.env`; it is git-ignored. If a token leaks, revoke it: use 
 npm --prefix server run setup-admin
 ```
 
-The script asks for a password (at least 12 characters) without displaying it. It prints `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` and a random `SESSION_SECRET`; paste those into `server/.env`, or your host's environment settings, and restart. The password itself is never stored, only its scrypt hash. Changing `SESSION_SECRET` signs everyone out.
+The script asks for a password (at least 12 characters) without displaying it. It prints `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` and a random `SESSION_SECRET`; paste those into `server/.env`, or your host's environment settings, and restart.
 
-Without these values, the server runs **with no login**, but only on localhost. It refuses to start in production or on a public `HOST`.
+- **The password itself is never stored**, only its scrypt hash.
+- **There's no default password.** Without these values, the server runs **with no login**, but only on localhost in development. It refuses to start in production or on a public `HOST`.
+- **Changing `SESSION_SECRET` signs everyone out.**
 
-**Security in place:**
-- **Session:** an httpOnly, `SameSite=Strict` cookie that expires after 8 hours.
-- **CSRF check:** a required `X-Requested-With: offerly` header on every change request.
-- **Login errors:** the same "incorrect username or password" message, so valid usernames aren't revealed.
-- **Rate limits** (per process):
+**Who needs a login:**
 
-  | What | Limit |
-  |---|---|
-  | Login | 5 per minute per IP |
-  | Recommendations | 30 per minute per admin |
-  | All API calls | 300 per minute per IP |
-  | Telegram `/offer` | 1 per 10 seconds per chat |
+| Route | Access |
+|---|---|
+| `GET /api/health` | Public: status only, no business data |
+| `/api/auth/*` | Login, logout, session check |
+| Every other `/api` route | Signed-in admin |
+| Rule changes, offer status changes, recommendations (which reserve budget and can trigger Telegram delivery) | Signed-in admin **and** the CSRF checks |
+| Telegram bot | **Separate from admin login.** Customers are identified by their Telegram chat, never by the dashboard login. |
 
-- **Security headers:** Content-Security-Policy, nosniff, frame denial and referrer policy, plus HSTS in production.
+**How sessions work:**
+- **Server-side storage.** The browser holds only a random 256-bit token, in an `HttpOnly; SameSite=Strict` cookie. In production it's `Secure` with the `__Host-` prefix. MongoDB (`adminsessions` collection) stores only a keyed hash of the token. MongoDB deletes expired sessions automatically.
+- **Expiry.** Sessions end after **60 minutes idle** (`SESSION_IDLE_MINUTES`) or **8 hours in total** (`SESSION_TTL_HOURS`), whichever comes first.
+- **Sign-out** deletes the session on the server, so a copied cookie stops working at once.
+- **Each sign-in issues a new token.**
+
+**Passwords:** scrypt with N=2¹⁷, r=8, p=1 (the OWASP-recommended cost), run asynchronously and one at a time, so it can't block the bot or exhaust memory. Hashes made by older versions of `setup-admin` still work; re-run it to upgrade.
+
+**Blocking cross-site requests (CSRF):** every change request needs the `X-Requested-With: offerly` header, which the dashboard sends automatically. Requests whose `Origin` or `Sec-Fetch-Site` shows they come from another site are refused.
+
+**Responses:**
+
+| Code | Meaning |
+|---|---|
+| `401` | Not signed in, or the session expired or was revoked |
+| `403` | Blocked by the CSRF check |
+| `429` | Too many attempts |
+
+Errors never include stack traces or credentials, and a wrong username gets the same answer as a wrong password.
+
+**Rate limits** (per process):
+
+| What | Limit |
+|---|---|
+| Login | 5 attempts per minute per IP, **and** a lock on any username after 10 failures in 15 minutes |
+| Recommendations | 30 per minute per admin |
+| All API calls | 300 per minute per IP |
+| Telegram `/offer` | 1 per 10 seconds per chat |
+
+**Security headers:** Content-Security-Policy, nosniff, frame denial and referrer policy, plus HSTS in production.
 
 **Not covered:**
 - one admin account only, with no roles;
-- sign-out clears the cookie but doesn't revoke other sessions (rotate `SESSION_SECRET` for that);
-- rate limits are in memory, so they assume a single server instance;
+- login rate limits and lockouts are kept in memory, so they assume a single server instance and reset on restart;
 - Telegram webhook mode isn't implemented (long polling only).
+
+**Upgrading from the earlier login:** everyone signs in once more. No variables need changing. A new `adminsessions` collection is created automatically.
 
 ## Telegram setup
 

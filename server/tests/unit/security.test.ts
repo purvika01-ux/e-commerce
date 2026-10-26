@@ -2,39 +2,46 @@ import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/config';
 import { hashPassword, verifyPassword } from '../../src/security/passwords';
 import { createRateLimiter } from '../../src/security/rateLimit';
-import { createSessionToken, readCookie, verifySessionToken } from '../../src/security/session';
+import { clearedSessionCookie, readCookie, sessionCookie, sessionCookieName } from '../../src/security/session';
 
 const SECRET = 's'.repeat(40);
-const NOW = new Date('2026-10-25T10:00:00Z');
+const FAST = { N: 2 ** 14 }; // lower cost only to keep most unit tests quick
 
 describe('password hashing', () => {
-  const hash = hashPassword('correct horse battery');
-  it('verifies the right password and rejects others', () => {
-    expect(verifyPassword('correct horse battery', hash)).toBe(true);
-    expect(verifyPassword('correct horse batterY', hash)).toBe(false);
-    expect(verifyPassword('', hash)).toBe(false);
+  it('uses the OWASP scrypt cost by default and verifies only the right password', async () => {
+    const hash = await hashPassword('correct horse battery');
+    expect(hash.startsWith(`scrypt:${2 ** 17}:8:1:`)).toBe(true);
+    expect(await verifyPassword('correct horse battery', hash)).toBe(true);
+    expect(await verifyPassword('correct horse batterY', hash)).toBe(false);
   });
-  it('salts every hash and rejects malformed stored values', () => {
-    expect(hashPassword('same')).not.toBe(hashPassword('same'));
-    expect(hash).not.toContain('$');
-    for (const bad of ['', 'plaintext', 'scrypt:1:2', hash.replace('scrypt', 'bcrypt')]) expect(verifyPassword('x', bad)).toBe(false);
+
+  it('still verifies hashes made with the older, lower cost (no forced migration)', async () => {
+    const legacy = await hashPassword('legacy password', FAST);
+    expect(legacy.startsWith(`scrypt:${2 ** 14}:`)).toBe(true);
+    expect(await verifyPassword('legacy password', legacy)).toBe(true);
+  });
+
+  it('salts every hash and rejects malformed or tampered stored values', async () => {
+    const a = await hashPassword('same', FAST);
+    expect(a).not.toBe(await hashPassword('same', FAST));
+    expect(a).not.toContain('$');
+    const absurd = a.replace(`scrypt:${2 ** 14}:`, `scrypt:${2 ** 30}:`);
+    for (const bad of ['', 'plaintext', 'scrypt:1:2', a.replace('scrypt', 'bcrypt'), absurd]) expect(await verifyPassword('x', bad)).toBe(false);
   });
 });
 
-describe('session tokens', () => {
-  const token = createSessionToken('admin', SECRET, NOW, 3_600_000);
-  it('accepts a valid token until it expires', () => {
-    expect(verifySessionToken(token, SECRET, NOW)?.username).toBe('admin');
-    expect(verifySessionToken(token, SECRET, new Date(NOW.getTime() + 3_600_000))).toBeNull();
+describe('session cookies', () => {
+  it('are HttpOnly, SameSite=Strict, and use the __Host- prefix with Secure in production', () => {
+    const dev = sessionCookie('tok', { secure: false, maxAgeMs: 3_600_000 });
+    expect(dev).toMatch(/^offerly_session=tok; Path=\/; HttpOnly; SameSite=Strict; Max-Age=3600$/);
+    const prod = sessionCookie('tok', { secure: true, maxAgeMs: 3_600_000 });
+    expect(prod.startsWith('__Host-offerly_session=tok; Path=/;')).toBe(true);
+    expect(prod).toContain('Secure');
+    expect(prod).not.toContain('Domain');
+    expect(clearedSessionCookie(true)).toContain('Max-Age=0');
+    expect(sessionCookieName(true)).toBe('__Host-offerly_session');
   });
-  it('rejects tampering, the wrong secret and garbage', () => {
-    const [data, sig] = token.split('.');
-    const forged = Buffer.from(JSON.stringify({ u: 'admin', iat: 0, exp: 9e15 })).toString('base64url');
-    expect(verifySessionToken(`${forged}.${sig}`, SECRET, NOW)).toBeNull();
-    expect(verifySessionToken(`${data}.${sig}x`, SECRET, NOW)).toBeNull();
-    expect(verifySessionToken(token, 't'.repeat(40), NOW)).toBeNull();
-    for (const g of [undefined, '', 'abc', 'a.b.c', '.']) expect(verifySessionToken(g, SECRET, NOW)).toBeNull();
-  });
+
   it('reads one cookie from a header', () => {
     expect(readCookie('a=1; offerly_session=tok%2Ben; b=2', 'offerly_session')).toBe('tok+en');
     expect(readCookie('a=1', 'offerly_session')).toBeUndefined();
@@ -56,7 +63,6 @@ describe('rate limiter', () => {
 
 describe('configuration guard', () => {
   const base = { MONGODB_URI: 'mongodb://127.0.0.1:27017/offerly' };
-  const hash = hashPassword('a long admin password');
   const message = (env: Record<string, string>) => {
     try {
       loadConfig(env as NodeJS.ProcessEnv);
@@ -66,15 +72,17 @@ describe('configuration guard', () => {
     }
   };
 
-  it('allows running without login only on localhost in development', () => {
+  it('has no default password: login can only be skipped on localhost in development', () => {
     expect(loadConfig(base as NodeJS.ProcessEnv).authEnabled).toBe(false);
     expect(message({ ...base, NODE_ENV: 'production' })).toContain('ADMIN_PASSWORD_HASH and SESSION_SECRET');
     expect(message({ ...base, HOST: '0.0.0.0' })).toContain('ADMIN_PASSWORD_HASH and SESSION_SECRET');
   });
 
-  it('enables login when both values are present, and rejects half a configuration', () => {
+  it('enables login when both values are present, and rejects half a configuration', async () => {
+    const hash = await hashPassword('a long admin password', FAST);
     const cfg = loadConfig({ ...base, NODE_ENV: 'production', HOST: '0.0.0.0', ADMIN_PASSWORD_HASH: hash, SESSION_SECRET: SECRET } as NodeJS.ProcessEnv);
     expect(cfg.authEnabled).toBe(true);
+    expect(cfg.SESSION_IDLE_MINUTES).toBe(60);
     expect(message({ ...base, ADMIN_PASSWORD_HASH: hash })).toContain('SESSION_SECRET');
     expect(message({ ...base, SESSION_SECRET: SECRET })).toContain('ADMIN_PASSWORD_HASH');
   });

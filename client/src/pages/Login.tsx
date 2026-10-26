@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api';
 import { Button } from '../ui';
 
-export function Login({ onSignedIn }: { onSignedIn: () => void }) {
+export function Login({ onSignedIn, notice }: { onSignedIn: () => void; notice?: string }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -21,7 +21,9 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
       const apiErr = err instanceof ApiError ? err : null;
       setError(
         apiErr?.status === 429
-          ? 'Too many attempts. Please wait a minute and try again.'
+          ? 'Too many sign-in attempts. Please wait and try again later.'
+          : apiErr?.status === 403
+            ? 'Sign-in was blocked by a security check. Reload the page and try again.'
           : apiErr?.status === 401
             ? 'Incorrect username or password.'
             : (apiErr?.message ?? 'Sign-in failed. Please try again.'),
@@ -54,6 +56,11 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
               <p className="text-xs text-ink-500">Sign in to manage offers and rules</p>
             </div>
           </div>
+          {notice && !error && (
+            <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              {notice}
+            </p>
+          )}
           <label className="mb-3 block text-sm">
             <span className="mb-1 block text-ink-700">Username</span>
             <input

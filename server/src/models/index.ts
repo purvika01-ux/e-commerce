@@ -215,9 +215,21 @@ const engagementSchema = new Schema({
 engagementSchema.index({ decisionId: 1, type: 1 });
 export const EngagementEvent = mongoose.model('EngagementEvent', engagementSchema);
 
+// ---------- adminSessions (server-side dashboard sessions; only a keyed hash of the token is stored) ----------
+const adminSessionSchema = new Schema({
+  tokenHash: { type: String, required: true, unique: true },
+  username: { type: String, required: true },
+  createdAt: { type: Date, required: true },
+  lastSeenAt: { type: Date, required: true },
+  expiresAt: { type: Date, required: true },
+});
+// MongoDB deletes sessions automatically once their absolute expiry has passed.
+adminSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+export const AdminSession = mongoose.model('AdminSession', adminSessionSchema);
+
 export async function ensureIndexes(): Promise<void> {
   await Promise.all(
-    [Customer, CustomerEvent, Offer, RuleSet, Trigger, Decision, TelegramLink, Delivery, EngagementEvent].map((m) => m.syncIndexes()),
+    [Customer, CustomerEvent, Offer, RuleSet, Trigger, Decision, TelegramLink, Delivery, EngagementEvent, AdminSession].map((m) => m.syncIndexes()),
   );
 }
 

@@ -67,7 +67,7 @@ async function main() {
   }
   console.log('\nAdd these lines to server/.env (or your host\'s environment settings), then restart the server:\n');
   console.log(`ADMIN_USERNAME=${username}`);
-  console.log(`ADMIN_PASSWORD_HASH=${hashPassword(password)}`);
+  console.log(`ADMIN_PASSWORD_HASH=${await hashPassword(password)}`);
   console.log(`SESSION_SECRET=${randomBytes(48).toString('base64url')}`);
   console.log('\nKeep these out of Git. Changing SESSION_SECRET signs everyone out.');
 }

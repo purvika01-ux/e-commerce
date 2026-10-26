@@ -73,6 +73,8 @@ Remove-Item Env:MONGODB_URI
 ```
 **Expected:** `seed complete` with `customers: 120` and `offers: 7`. The seed script already uses public DNS (8.8.8.8 and 1.1.1.1), because some networks can't resolve Atlas's `mongodb+srv://` addresses.
 
+**Running the server on your laptop against Atlas:** if startup repeatedly logs `mongo connection failed; retrying`, add `DNS_SERVERS=8.8.8.8,1.1.1.1` to your local `server/.env`. Render doesn't need this.
+
 ### Step 3: Create the admin login
 ```powershell
 npm --prefix server run setup-admin

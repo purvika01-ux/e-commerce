@@ -25,6 +25,7 @@ const EnvSchema = z.object({
   ADMIN_PASSWORD_HASH: z.preprocess(blankToUndefined, z.string().regex(PASSWORD_HASH_PATTERN, 'must be generated with npm run setup-admin').optional()),
   SESSION_SECRET: z.preprocess(blankToUndefined, z.string().min(32, 'must be at least 32 characters (npm run setup-admin generates one)').optional()),
   SESSION_TTL_HOURS: z.coerce.number().min(1).max(72).default(8),
+  SESSION_IDLE_MINUTES: z.coerce.number().int().min(5).max(24 * 60).default(60),
   // Optional comma-separated DNS servers (e.g. 8.8.8.8,1.1.1.1) for networks that cannot resolve Atlas SRV records.
   DNS_SERVERS: z.preprocess(
     (v) => (typeof v === 'string' && v.trim() ? v.split(',').map((s) => s.trim()).filter(Boolean) : []),

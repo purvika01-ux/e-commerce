@@ -3,18 +3,27 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import type { Clock } from '../decision/orchestrator';
 import { AppError, badRequest } from '../infra/errors';
-import { dummyHash, verifyPassword } from './passwords';
-import { rateLimit, type RateLimiter } from './rateLimit';
-import { clearedSessionCookie, createSessionToken, readCookie, SESSION_COOKIE, sessionCookie, verifySessionToken } from './session';
+import { dummyHashLike, verifyPassword } from './passwords';
+import { createRateLimiter, rateLimit, type RateLimiter } from './rateLimit';
+import { clearedSessionCookie, createSession, destroySession, readCookie, resolveSession, sessionCookie, sessionCookieName, type SessionPolicy } from './session';
 
 export interface AuthConfig {
   username: string;
   passwordHash: string;
   sessionSecret: string;
-  /** Adds the Secure cookie flag; must be true whenever the app is served over HTTPS. */
+  /** Adds the Secure flag and the __Host- cookie prefix; must be true whenever the app is served over HTTPS. */
   secureCookie: boolean;
+  /** Absolute session lifetime. */
   sessionTtlMs: number;
+  /** Sign out after this long without activity. */
+  idleTimeoutMs: number;
 }
+
+/** Failed logins per username before that username is locked for the rest of the window. */
+export const USERNAME_LOCKOUT = { maxFailures: 10, windowMs: 15 * 60_000 };
+
+const policyOf = (auth: AuthConfig): SessionPolicy => ({ secret: auth.sessionSecret, absoluteTtlMs: auth.sessionTtlMs, idleTimeoutMs: auth.idleTimeoutMs });
+const tokenOf = (req: Request, auth: AuthConfig) => readCookie(req.get('cookie'), sessionCookieName(auth.secureCookie));
 
 export const CSRF_HEADER = 'X-Requested-With';
 export const CSRF_VALUE = 'offerly';
@@ -51,48 +60,81 @@ function hasCsrfHeader(req: Request): boolean {
   return req.get(CSRF_HEADER) === CSRF_VALUE;
 }
 
+/**
+ * Second CSRF layer: browsers send Origin (and Sec-Fetch-Site) on state-changing requests.
+ * A request that says it comes from another site is refused even if it somehow carries the header.
+ */
+function isCrossSite(req: Request): boolean {
+  if (req.get('Sec-Fetch-Site') === 'cross-site') return true;
+  const origin = req.get('Origin');
+  if (!origin || origin === 'null') return origin === 'null';
+  return origin !== `${req.protocol}://${req.get('host')}`;
+}
+
+function assertSameSiteRequest(req: Request) {
+  if (!hasCsrfHeader(req) || isCrossSite(req)) throw new AppError('FORBIDDEN', 403, 'Request blocked by CSRF protection');
+}
+
 function sameString(a: string, b: string): boolean {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-/** Resolves the signed-in admin from the session cookie, or null. */
-export function currentUser(req: Request, auth: AuthConfig, clock: Clock) {
-  return verifySessionToken(readCookie(req.get('cookie'), SESSION_COOKIE), auth.sessionSecret, clock.now());
-}
-
 /** /api/auth: login, logout, me. When auth is disabled (local-only use) me reports that. */
 export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: RateLimiter): Router {
   const r = Router();
+  // The limiter reports "not allowed" once the count exceeds max, so max = maxFailures - 1 locks on the Nth failure.
+  const failures = createRateLimiter({ windowMs: USERNAME_LOCKOUT.windowMs, max: USERNAME_LOCKOUT.maxFailures - 1 });
+  const lockedUntil = new Map<string, number>();
 
-  r.get('/me', (req, res) => {
+  r.get('/me', async (req, res) => {
     if (!auth) return void res.json({ authRequired: false, user: null });
-    const user = currentUser(req, auth, clock);
-    if (!user) throw new AppError('UNAUTHENTICATED', 401, 'Please sign in');
-    res.json({ authRequired: true, user: { username: user.username, expiresAt: user.expiresAt } });
+    const session = await resolveSession(tokenOf(req, auth), policyOf(auth), clock.now());
+    if (!session) throw new AppError('UNAUTHENTICATED', 401, 'Please sign in');
+    res.json({ authRequired: true, user: { username: session.username, expiresAt: session.expiresAt, idleExpiresAt: session.idleExpiresAt } });
   });
 
   r.post(
     '/login',
     rateLimit(loginLimiter, (req) => `login:${req.ip}`),
-    (req, res) => {
+    async (req, res) => {
       if (!auth) throw new AppError('AUTH_DISABLED', 400, 'Login is not configured on this server');
-      if (!hasCsrfHeader(req)) throw new AppError('FORBIDDEN', 403, 'Missing request header');
+      assertSameSiteRequest(req);
       const body = z.object({ username: z.string().min(1).max(64), password: z.string().min(1).max(128) }).strict().safeParse(req.body);
       if (!body.success) throw badRequest('Enter a username and password');
+
+      // Per-username lockout (any username string, so it reveals nothing about which usernames exist).
+      const key = body.data.username.toLowerCase();
+      const until = lockedUntil.get(key) ?? 0;
+      if (until > Date.now()) {
+        const retryAfterSec = Math.ceil((until - Date.now()) / 1000);
+        res.setHeader('Retry-After', String(retryAfterSec));
+        throw new AppError('RATE_LIMITED', 429, 'Too many failed sign-in attempts. Try again later.');
+      }
+
       // Always run the password check, even for an unknown username, so timing does not reveal valid usernames.
       const userMatches = sameString(body.data.username, auth.username);
-      const passwordMatches = verifyPassword(body.data.password, userMatches ? auth.passwordHash : dummyHash());
-      if (!userMatches || !passwordMatches) throw new AppError('INVALID_CREDENTIALS', 401, 'Incorrect username or password');
-      const token = createSessionToken(auth.username, auth.sessionSecret, clock.now(), auth.sessionTtlMs);
-      res.setHeader('Set-Cookie', sessionCookie(token, { secure: auth.secureCookie, maxAgeMs: auth.sessionTtlMs }));
-      res.json({ authRequired: true, user: { username: auth.username } });
+      const passwordMatches = await verifyPassword(body.data.password, userMatches ? auth.passwordHash : await dummyHashLike(auth.passwordHash));
+      if (!userMatches || !passwordMatches) {
+        const hit = failures.hit(key);
+        if (!hit.allowed) lockedUntil.set(key, Date.now() + hit.retryAfterSec * 1000);
+        throw new AppError('INVALID_CREDENTIALS', 401, 'Incorrect username or password');
+      }
+      lockedUntil.delete(key);
+
+      const session = await createSession(auth.username, policyOf(auth), clock.now());
+      res.setHeader('Set-Cookie', sessionCookie(session.token, { secure: auth.secureCookie, maxAgeMs: auth.sessionTtlMs }));
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ authRequired: true, user: { username: auth.username, expiresAt: session.expiresAt } });
     },
   );
 
-  r.post('/logout', (req, res) => {
-    if (auth && !hasCsrfHeader(req)) throw new AppError('FORBIDDEN', 403, 'Missing request header');
+  r.post('/logout', async (req, res) => {
+    if (auth) {
+      assertSameSiteRequest(req);
+      await destroySession(tokenOf(req, auth), policyOf(auth));
+    }
     res.setHeader('Set-Cookie', clearedSessionCookie(auth?.secureCookie ?? false));
     res.status(204).end();
   });
@@ -100,21 +142,30 @@ export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: 
   return r;
 }
 
-/** Every /api route except health and /auth requires a valid session when auth is configured. */
+/** Every /api route except health and /auth requires a valid server-side session when auth is configured. */
 export function requireAuth(auth: AuthConfig | null, clock: Clock) {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     if (!auth || req.path === '/health') return next();
-    const user = currentUser(req, auth, clock);
-    if (!user) return next(new AppError('UNAUTHENTICATED', 401, 'Please sign in'));
-    res.locals.user = user.username;
-    next();
+    try {
+      const session = await resolveSession(tokenOf(req, auth), policyOf(auth), clock.now());
+      if (!session) return next(new AppError('UNAUTHENTICATED', 401, 'Please sign in'));
+      res.locals.user = session.username;
+      next();
+    } catch (err) {
+      next(err); // e.g. database unavailable → 503 from the error handler; never treated as signed in
+    }
   };
 }
 
-/** CSRF defence for cookie sessions: state-changing requests must carry a custom header. */
+/** CSRF defence for cookie sessions: state-changing requests need the custom header and must not be cross-site. */
 export function csrfGuard(auth: AuthConfig | null) {
   return (req: Request, _res: Response, next: NextFunction) => {
-    if (!auth || SAFE_METHODS.has(req.method) || hasCsrfHeader(req)) return next();
-    next(new AppError('FORBIDDEN', 403, 'Missing request header'));
+    if (!auth || SAFE_METHODS.has(req.method)) return next();
+    try {
+      assertSameSiteRequest(req);
+      next();
+    } catch (err) {
+      next(err);
+    }
   };
 }
