@@ -182,3 +182,104 @@ export function fieldErrors(err: unknown): Record<string, string> {
   }
   return out;
 }
+
+// ---------------------------------------------------------------- analytics
+
+export type AnalyticsRange = '7d' | '30d' | '90d' | 'all' | 'custom';
+export type AnalyticsOrigin = 'all' | 'classmate' | 'admin';
+
+export interface Rate {
+  numerator: number;
+  denominator: number;
+  /** null when nothing was observed — shown as "—", never 0%. */
+  value: number | null;
+  smallSample: boolean;
+}
+
+export interface CohortBudget {
+  reservedPaise: number;
+  releasedPaise: number;
+  heldPaise: number;
+}
+
+export interface AnalyticsReport {
+  filters: { range: AnalyticsRange; from: string | null; to: string; fromDay: string | null; toDay: string; timezone: string; segment: string | null; offer: string | null; origin: AnalyticsOrigin };
+  generatedAt: string;
+  empty: boolean;
+  totals: {
+    decisions: number;
+    customers: number;
+    issued: number;
+    stillApproved: number;
+    cancelled: number;
+    noOffer: number;
+    rejected: number;
+    errors: number;
+    delivered: number;
+    customersReached: number;
+    claimed: number;
+    customersClaimed: number;
+    declined: number;
+    expiredUnanswered: number;
+    redeemed: number;
+    paths: { ai: number; aiRetry: number; fallback: number };
+  };
+  rates: { approval: Rate; deliverySuccess: Rate; claim: Rate; decline: Rate; noResponse: Rate };
+  delivery: {
+    attempted: number;
+    sent: number;
+    failed: number;
+    precheckCancelled: number;
+    inFlight: number;
+    notSent: number;
+    retried: number;
+    recoveredByRetry: number;
+    extraAttempts: number;
+    failureReasons: { reason: string; count: number }[];
+    precheckRules: { rule: string; count: number }[];
+  };
+  budget: {
+    cohort: CohortBudget & { redeemedPaise: number };
+    current: { offers: number; totalPaise: number; reservedPaise: number; redeemedPaise: number; remainingPaise: number };
+  };
+  reasons: {
+    noOffer: { reason: string; count: number }[];
+    exclusionRules: { rule: string; count: number }[];
+    rejectionRules: { rule: string; count: number }[];
+    cancellations: { reason: string; count: number }[];
+    errors: { reason: string; count: number }[];
+  };
+  byOffer: {
+    code: string;
+    name: string;
+    status: string;
+    issued: number;
+    cancelled: number;
+    delivered: number;
+    deliveryFailed: number;
+    claimed: number;
+    declined: number;
+    expiredUnanswered: number;
+    claimRate: Rate;
+    cohortBudget: CohortBudget;
+    currentBudget: { totalPaise: number; reservedPaise: number; redeemedPaise: number; remainingPaise: number };
+  }[];
+  bySegment: {
+    segment: string;
+    decisions: number;
+    issued: number;
+    noOffer: number;
+    blocked: number;
+    delivered: number;
+    claimed: number;
+    declined: number;
+    reservedPaise: number;
+    approvalRate: Rate;
+    claimRate: Rate;
+  }[];
+  daily: { timezone: string; truncated: boolean; points: { date: string; decisions: number; issued: number; noOffer: number; blocked: number; delivered: number; claimed: number }[] };
+  origins: Record<string, number>;
+  provenance: { generated: string; observed: string; simulated: string };
+  unsupported: { metric: string; reason: string; needed: string }[];
+  smallSampleThreshold: number;
+}

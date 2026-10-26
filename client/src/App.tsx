@@ -1,6 +1,6 @@
-import { Bot, Cpu, Database, Gift, LayoutDashboard, ListChecks, LogOut, Menu, ScrollText, Sparkles, Users, X } from 'lucide-react';
+import { Bot, ChartColumn, Cpu, Database, Gift, LayoutDashboard, ListChecks, LogOut, Menu, ScrollText, Sparkles, Users, X } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { api, ApiError, UNAUTHENTICATED_EVENT, type Health } from './api';
 import { ToastProvider, useDialogFocus } from './overlays';
 import { Customers } from './pages/Customers';
@@ -11,9 +11,13 @@ import { Overview } from './pages/Overview';
 import { Rules } from './pages/Rules';
 import { Badge, ErrorState, Spinner, useAsync } from './ui';
 
-type Tab = 'overview' | 'customers' | 'offers' | 'rules' | 'decisions';
+// Loaded on first visit: keeps the analytics code out of the initial download.
+const Analytics = lazy(() => import('./pages/Analytics').then((m) => ({ default: m.Analytics })));
+
+type Tab = 'overview' | 'analytics' | 'customers' | 'offers' | 'rules' | 'decisions';
 const TABS: { id: Tab; label: string; icon: typeof Users }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'analytics', label: 'Campaign results', icon: ChartColumn },
   { id: 'customers', label: 'Customers', icon: Users },
   { id: 'offers', label: 'Offers', icon: Gift },
   { id: 'rules', label: 'Business rules', icon: ListChecks },
@@ -158,6 +162,11 @@ function Shell({ user, onLogout }: { user: string | null; onLogout: () => void }
                     setTab('decisions');
                   }}
                 />
+              )}
+              {tab === 'analytics' && (
+                <Suspense fallback={<Spinner label="Loading campaign results…" />}>
+                  <Analytics />
+                </Suspense>
               )}
               {tab === 'customers' && <Customers telegramEnabled={Boolean(health.data?.telegram.enabled)} aiLive={health.data?.ai.mode === 'live'} />}
               {tab === 'offers' && <Offers />}

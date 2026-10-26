@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
+import { computeAnalytics } from '../analytics/aggregate';
+import { AnalyticsQuerySchema, resolveFilters } from '../analytics/filters';
 import { describeRule, parseRules, RULE_CATALOG, RULE_TYPES, type RuleSetRecord } from '../domain/rules';
 import { estimateCostPaise, SEGMENTS, type OfferRecord } from '../domain/types';
 import { OfferCreateSchema, OfferUpdateSchema, VERSIONED_FIELDS } from '../domain/offerInput';
@@ -197,6 +199,13 @@ export function apiRouter(deps: ApiDeps): Router {
       recentDecisions: recent.map(decisionSummary),
       dataNotice: 'All customers are synthetic. Engagement comes from classmates using synthetic profiles; it is descriptive, not causal.',
     });
+  });
+
+  // Campaign results: a cohort of decisions in an IST date window, aggregated in MongoDB.
+  r.get('/analytics', async (req, res) => {
+    const q = parse(AnalyticsQuerySchema, req.query);
+    const now = clock.now();
+    res.json(await computeAnalytics(resolveFilters(q, now), now));
   });
 
   r.get('/customers', async (req, res) => {

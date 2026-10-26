@@ -161,6 +161,7 @@ const decisionSchema = new Schema(
 );
 decisionSchema.index({ customerId: 1, decidedAt: -1 });
 decisionSchema.index({ status: 1, createdAt: -1 });
+decisionSchema.index({ decidedAt: -1 }); // analytics windows
 decisionSchema.index({ 'grant.code': 1 }, { unique: true, partialFilterExpression: { 'grant.code': { $type: 'string' } } });
 export const Decision = mongoose.model('Decision', decisionSchema);
 

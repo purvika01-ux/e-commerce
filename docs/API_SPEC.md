@@ -20,7 +20,8 @@
 | `GET /api/deliveries` | ✅ Implemented | Retry endpoint not implemented |
 | `POST /api/redemptions`, `GET /api/engagement` | ❌ Not implemented | Claims and declines come from Telegram buttons; redemption isn't implemented |
 | `/api/telegram/*` | ❌ Not implemented | Long polling only; no webhook |
-| `/api/analytics/*` | ❌ Not implemented | Summary figures are in `GET /api/overview` |
+| `GET /api/analytics` | ✅ Implemented | One endpoint instead of the planned `/api/analytics/*` set. See §11. |
+| `/api/analytics/relevance`, `/api/analytics/experiment/:key` | ❌ Not implemented | No relevance evaluation or holdout group exists yet |
 
 **Auth on implemented routes:**
 - Everything except `/api/health` and `/api/auth/*` needs a signed-in admin when login is configured.
@@ -342,6 +343,39 @@ Bot commands (`/start`, `/offer`, `/myoffers`, `/profile`, `/stop`, `/help`) and
 ---
 
 ## 11. Analytics
+
+### Implemented: `GET /api/analytics`
+
+Campaign results computed in MongoDB (one aggregation over `decisions`, joined to `deliveries` and `engagementevents`). Admin session required.
+
+**Query** (strict; unknown parameters are a 400):
+
+| Param | Values | Notes |
+|---|---|---|
+| `range` | `7d` · `30d` (default) · `90d` · `all` · `custom` | Presets are whole days in India Standard Time ending today: `7d` is today and the 6 days before. `all` also ends with today. |
+| `from`, `to` | `YYYY-MM-DD` | Only with `range=custom`. Both days are included. At most 366 days. |
+| `segment` | a segment key | The segment stored on the decision at decision time (`contextSnapshot.segment`) |
+| `offer` | an offer code | Only decisions that issued that offer |
+| `origin` | `all` (default) · `classmate` · `admin` | Bot requests vs dashboard decisions. `test` data and previews are always excluded. |
+
+**How figures are counted:**
+- **Cohort.** Every figure belongs to the decisions made in the window. Later deliveries, taps and budget releases count toward their decision, so all filters apply to all figures.
+- **No double counting.** Deliveries and engagement events are collapsed per decision before counting. Claims require a successful delivery.
+- **Rates** are `{ numerator, denominator, value, smallSample }`. `value` is `null` when the denominator is 0, and `smallSample` is set below 10.
+- **Budget.**
+  - `budget.cohort` holds worst-case reservations for the window: reserved, released (declined, expired or void) and still held.
+  - `budget.current` is a snapshot of live offers and is not filtered by date or segment.
+
+**Response (abridged):** `filters`, `empty`, `totals`, `rates` (approval, deliverySuccess, claim, decline, noResponse), `delivery` (attempted, sent, failed, precheckCancelled, inFlight, notSent, retried, recoveredByRetry, extraAttempts, failureReasons, precheckRules), `budget`, `reasons` (noOffer, exclusionRules, rejectionRules, cancellations, errors; rules counted once per decision), `byOffer`, `bySegment`, `daily` (a zero-filled series in IST days), `origins`, `provenance`, `unsupported`.
+
+**Not reported because the data does not exist** (listed in `unsupported`):
+- redemptions and purchases;
+- revenue and actual discount spent;
+- incremental lift or causal impact (there is no holdout group);
+- message read rates;
+- manual delivery retries.
+
+### Original design (not built as specified)
 
 Every metric object carries `{ value, origin: "observed"|"simulated"|"experimental", n }`. Responses accept `from?`, `to?`, and `origin?` (filter).
 

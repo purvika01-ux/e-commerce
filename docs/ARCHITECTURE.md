@@ -7,7 +7,7 @@
 > - Grant expiry, crash recovery and budget reconciliation run as an in-process maintenance job.
 > - The bot runs under a supervisor.
 >
-> **Not implemented:** event triggers (M11), redemption, the analytics suite and holdout (M13), the `adminAuditLog` collection (admin actions are logged as structured `event` log lines instead), webhooks and email.
+> **Not implemented:** event triggers (M11), redemption, holdout experiments (M13; campaign analytics exist as one endpoint, `GET /api/analytics`, in `server/src/analytics/`), the `adminAuditLog` collection (admin actions are logged as structured `event` log lines instead), webhooks and email.
 >
 > See `docs/API_SPEC.md` → Implementation status.
 > Consistent with: `Hackathon_2_Brief.pdf` (source of truth), `CLAUDE.md` (guardrails), `docs/PROJECT_PLAN.md` (requirements and phases).

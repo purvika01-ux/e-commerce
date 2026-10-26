@@ -6,7 +6,7 @@
 > - concurrency and idempotency, delivery failures;
 > - auth, CSRF and rate limits, maintenance jobs, logging, deployment behaviour.
 >
-> **Not implemented:** frontend tests (FE-*), the triggers (T-*), redemption (R-*) and analytics (AN-*) tests (those features don't exist), and the live evaluation script.
+> **Not implemented:** frontend tests (FE-*), the triggers (T-*) and redemption (R-*) tests (those features don't exist), AN-06 (no experiment endpoint), and the live evaluation script. Analytics tests AN-01…AN-05 are covered (§12).
 >
 > **Database:** tests use a **throwaway database per test file on a local `mongod`**, not `mongodb-memory-server`. Set `MONGODB_TEST_URI` to point elsewhere.
 > Consistent with `CLAUDE.md` §5 and §8 and `docs/ARCHITECTURE.md`.
@@ -415,6 +415,16 @@ Vitest + React Testing Library + MSW. No live backend is used.
 | AN-04 | No data | Zeros with `n: 0` | Division by zero or NaN |
 | AN-05 | Validation violations by rule and path | Correct grouping | — |
 | AN-06 | Experiment endpoint with a small n (M13) | Returns n and a "directional only" flag | Causal wording |
+
+**Implemented** in `server/tests/integration/analytics.test.ts` and `server/tests/unit/analytics-filters.test.ts`:
+- **Empty dataset:** zeros, `value: null` rates, a zero-filled series and the `unsupported` list (AN-04).
+- **Real pipeline end to end:** send with a retry, a blocked user, a duplicate send call, a repeated claim, no-offer reasons, budget reserved / released / held. Test data and previews are excluded, and the `origin` filter works (AN-01, AN-02, AN-03).
+- **Duplicate records:** duplicate delivery rows and engagement events collapse per decision. Each blocking rule counts once per decision (AN-05).
+- **Date boundaries:** the first and last millisecond of an IST window, a single custom day, and `all` ending today. Later deliveries and taps are attributed to the decision day.
+- **Filters and validation:**
+  - the segment and offer filters;
+  - 400s for bad ranges, impossible dates, unknown segments, sources or parameters;
+  - IST day arithmetic and rate edge cases (unit tests).
 
 ---
 

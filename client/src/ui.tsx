@@ -238,7 +238,7 @@ export function SegmentedControl<T extends string>({ options, value, onChange, l
             role="radio"
             aria-checked={active}
             onClick={() => onChange(o.value)}
-            className={`relative rounded-lg px-3 py-1.5 text-[0.8rem] font-medium transition-colors ${active ? 'text-ink' : 'text-ink-3 hover:text-ink-2'}`}
+            className={`relative shrink-0 rounded-lg px-3 py-1.5 text-[0.8rem] font-medium whitespace-nowrap transition-colors ${active ? 'text-ink' : 'text-ink-3 hover:text-ink-2'}`}
           >
             {active && <motion.span layoutId={`seg-${group}`} className="absolute inset-0 rounded-lg bg-surface-3 ring-1 ring-line-strong" transition={{ type: 'spring', stiffness: 400, damping: 34 }} />}
             <span className="relative">{o.label}</span>

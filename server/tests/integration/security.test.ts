@@ -53,6 +53,7 @@ describe('unauthenticated and direct API access', () => {
     const offerId = fx.offerId('WINBACK15');
     const routes: [string, string][] = [
       ['get', '/api/overview'],
+      ['get', '/api/analytics'],
       ['get', '/api/customers'],
       ['get', `/api/customers/${fx.customers.atRisk}`],
       ['get', '/api/offers'],
