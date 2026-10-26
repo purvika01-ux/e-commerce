@@ -1,3 +1,7 @@
+import dns from "node:dns";
+
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
+
 import { pathToFileURL } from 'node:url';
 import mongoose from 'mongoose';
 import { loadConfig, loadDotenv } from '../config';
