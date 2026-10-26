@@ -184,7 +184,7 @@ export function DailyChart<K extends string>({
               }
               return (
                 <g key={p.date}>
-                  {hover === i && <rect x={cx - slot / 2} y={pad.t} width={slot} height={plotH} fill="#ffffff08" rx={6} />}
+                  {hover === i && <rect x={cx - slot / 2} y={pad.t} width={slot} height={plotH} fill="var(--color-hover-tint)" rx={6} />}
                   {marks}
                   {i % labelEvery === 0 && (
                     <text x={cx} y={H - 8} textAnchor="middle" fontSize="10" fill="var(--color-ink-3)">

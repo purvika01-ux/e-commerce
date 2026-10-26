@@ -3,6 +3,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { api, ApiError, UNAUTHENTICATED_EVENT, type Health } from './api';
 import { ToastProvider, useDialogFocus } from './overlays';
+import { ThemeToggle } from './theme';
 import { Customers } from './pages/Customers';
 import { Decisions } from './pages/Decisions';
 import { Login } from './pages/Login';
@@ -121,13 +122,16 @@ function Shell({ user, onLogout }: { user: string | null; onLogout: () => void }
       {/* Mobile / tablet top bar */}
       <div className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-canvas/85 px-4 py-3 backdrop-blur lg:hidden">
         <Brand />
-        <button onClick={() => setMenuOpen(true)} className="rounded-lg p-2 text-ink-2 hover:bg-surface-3" aria-label="Open navigation" aria-expanded={menuOpen}>
-          <Menu size={20} aria-hidden />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <ThemeToggle />
+          <button onClick={() => setMenuOpen(true)} className="rounded-lg p-2 text-ink-2 hover:bg-surface-3" aria-label="Open navigation" aria-expanded={menuOpen}>
+            <Menu size={20} aria-hidden />
+          </button>
+        </div>
       </div>
       <AnimatePresence>
         {menuOpen && (
-          <motion.div className="fixed inset-0 z-40 bg-[#050812b3] lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMenuOpen(false)}>
+          <motion.div className="fixed inset-0 z-40 bg-scrim-soft lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMenuOpen(false)}>
             <motion.div
               ref={menuRef}
               className="flex h-full w-72 max-w-[85vw] flex-col overflow-y-auto border-r border-line bg-canvas p-4"
@@ -186,7 +190,7 @@ function Shell({ user, onLogout }: { user: string | null; onLogout: () => void }
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-accent to-ai text-accent-ink shadow-[0_8px_24px_-10px_#2dd4bf]">
+      <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-accent to-ai text-accent-ink shadow-[0_8px_24px_-10px_var(--color-accent-glow)]">
         <Sparkles size={18} aria-hidden />
       </span>
       <div>
@@ -200,8 +204,9 @@ function Brand() {
 function SideNav({ tab, onTab, health, healthError, user, onLogout }: { tab: Tab; onTab: (t: Tab) => void; health: Health | null; healthError: boolean; user: string | null; onLogout: () => void }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="hidden lg:block">
+      <div className="hidden items-center justify-between gap-2 lg:flex">
         <Brand />
+        <ThemeToggle />
       </div>
       <nav aria-label="Main" className="mt-6 lg:mt-8">
         <ul className="space-y-1">

@@ -140,10 +140,10 @@ export function PathBadge({ path }: { path: DecisionSummary['path'] }) {
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 const buttonStyles: Record<ButtonVariant, string> = {
-  primary: 'bg-accent text-accent-ink hover:bg-accent-strong shadow-[0_6px_20px_-8px_#2dd4bf80]',
-  secondary: 'bg-surface-3 text-ink ring-1 ring-inset ring-line-strong hover:bg-[#22304f]',
+  primary: 'bg-accent text-accent-ink hover:bg-accent-strong shadow-[0_6px_20px_-8px_var(--color-accent-glow)]',
+  secondary: 'bg-surface-3 text-ink ring-1 ring-inset ring-line-strong hover:bg-surface-4',
   ghost: 'text-ink-2 hover:bg-surface-3 hover:text-ink',
-  danger: 'bg-bad-soft text-bad-ink ring-1 ring-inset ring-bad/40 hover:bg-[#d03b3b40]',
+  danger: 'bg-bad-soft text-bad-ink ring-1 ring-inset ring-bad/40 hover:bg-bad/25',
 };
 
 export function Button({
@@ -190,7 +190,7 @@ export function Button({
 // ---------------------------------------------------------------- forms
 
 export const inputClass =
-  'w-full rounded-xl border border-line-strong bg-surface-3/70 px-3 py-2 text-sm text-ink placeholder:text-ink-3/80 transition-colors hover:border-[#94a3b870] focus:border-accent focus:outline-none focus-visible:outline-none focus:ring-2 focus:ring-accent/30 aria-[invalid=true]:border-bad aria-[invalid=true]:ring-bad/30';
+  'w-full rounded-xl border border-line-strong bg-surface-3/70 px-3 py-2 text-sm text-ink placeholder:text-ink-3/80 transition-colors hover:border-ink-3/60 focus:border-accent focus:outline-none focus-visible:outline-none focus:ring-2 focus:ring-accent/30 aria-[invalid=true]:border-bad aria-[invalid=true]:ring-bad/30';
 
 export function Field({ label, hint, error, children, htmlFor }: { label: string; hint?: string; error?: string; children: ReactNode; htmlFor?: string }) {
   return (

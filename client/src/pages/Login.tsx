@@ -2,6 +2,7 @@ import { AlertTriangle, LockKeyhole, LogIn, ShieldCheck, Sparkles, Workflow } fr
 import { motion } from 'motion/react';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api';
+import { ThemeToggle } from '../theme';
 import { Button, Field, inputClass } from '../ui';
 
 const POINTS = [
@@ -42,6 +43,7 @@ export function Login({ onSignedIn, notice }: { onSignedIn: () => void; notice?:
 
   return (
     <div className="grid min-h-full lg:grid-cols-[1.1fr_1fr]">
+      <ThemeToggle className="fixed top-4 right-4 z-10 bg-surface/80 backdrop-blur" />
       {/* Brand panel */}
       <section className="relative hidden overflow-hidden border-r border-line lg:flex lg:flex-col lg:justify-between lg:p-12">
         <div className="pointer-events-none absolute -top-40 -left-32 h-[28rem] w-[28rem] rounded-full bg-accent/10 blur-3xl" aria-hidden />

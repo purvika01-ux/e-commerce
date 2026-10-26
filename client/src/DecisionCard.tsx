@@ -47,9 +47,9 @@ export function DecisionCard({ d, delivery }: { d: DecisionSummary; delivery?: {
 
       {d.offer && d.copy && (
         <div className="grid gap-5 md:grid-cols-[1.1fr_1fr]">
-          <div className="rounded-2xl border border-line bg-[#0e1a2b] p-4">
+          <div className="rounded-2xl border border-line bg-tg-panel p-4">
             <p className="mb-2.5 text-[0.7rem] font-medium tracking-wider text-ink-3 uppercase">Telegram message</p>
-            <div className="rounded-2xl rounded-tl-md bg-[#1c2c44] p-3.5 text-[0.85rem] leading-relaxed text-ink shadow-sm">
+            <div className="rounded-2xl rounded-tl-md bg-tg-bubble p-3.5 text-[0.85rem] leading-relaxed text-ink shadow-sm">
               <p className="font-semibold">🎁 {d.copy.headline}</p>
               <p className="mt-1 text-ink-2">{d.copy.body}</p>
               <div className="mt-3 space-y-0.5 border-t border-line pt-2.5 text-[0.82rem]">
@@ -58,7 +58,7 @@ export function DecisionCard({ d, delivery }: { d: DecisionSummary; delivery?: {
                 {d.grant && <p className="text-ink-2">⏳ Valid until {when(d.grant.expiresAt)}</p>}
                 {d.grant && (
                   <p className="text-ink-2">
-                    🔑 Code: <code className="rounded bg-[#0b1424] px-1 font-mono text-accent-strong">{d.grant.code}</code>
+                    🔑 Code: <code className="rounded bg-tg-code px-1 font-mono text-accent-strong">{d.grant.code}</code>
                   </p>
                 )}
               </div>
