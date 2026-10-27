@@ -17,7 +17,7 @@ Offerly AI decides which offer each customer of an e-commerce platform should re
 |---|---|
 | Telegram bot | **[@SmartOffersAI_Bot](https://t.me/SmartOffersAI_Bot)** |
 | Repository | `github.com/purvika01-ux/e-commerce` (this repo) |
-| Dashboard | `https://<your-service>.onrender.com`. Fill in after deploying; sign-in is required. |
+| Dashboard | Shown live from the presenter's laptop; it is not publicly hosted. Locally it runs at `http://127.0.0.1:4000` with `npm start` (or the port set by `PORT`, see [Setup](#setup)), or `http://localhost:5173` in dev mode. Sign-in is required. |
 | Project instructions | [`CLAUDE.md`](CLAUDE.md) |
 
 **Try it in Telegram:**
@@ -26,7 +26,7 @@ Offerly AI decides which offer each customer of an e-commerce platform should re
 3. Send **/offer**. You get a personalised offer that has passed the business rules. Its terms come from the offer definition, and its wording from Claude, or from the rule-based fallback if Claude is unavailable.
 4. Tap **Claim** or **Not interested**. `/myoffers` lists offers you hold; `/stop` opts out.
 
-**In the dashboard:** every decision appears in the **Decision log**, with the candidates, the AI's attempts, each validation run and the delivery result.
+**In the dashboard:** every decision appears in the **Decision log**, with the candidates, the AI's attempts, each validation run and the delivery result. **Campaign results** shows what happened next: deliveries, claims, budget and why offers were withheld.
 
 ## How a decision is made
 
@@ -60,6 +60,8 @@ cp .env.example .env        # then edit .env
 npm run seed                # 120 synthetic customers, 7 offers, rule set v1
 ```
 
+`npm run seed` replaces all data. It refuses to run while Telegram chats are linked, unless you add `--force` (which also removes those links).
+
 ```bash
 cd client
 npm install
@@ -71,7 +73,9 @@ cd server
 npm start                   # http://127.0.0.1:4000
 ```
 
-For UI development with hot reload, run `npm run dev` in `client/` (http://localhost:5173, which proxies `/api` to port 4000).
+For UI development with hot reload, run `npm run dev` in `server/` and, in a second terminal, `npm run dev` in `client/`. Then open http://localhost:5173, which proxies `/api` to the server.
+
+**If port 4000 is already in use** (for example by another project), set a free port such as `PORT=4001` in `server/.env` and restart the server. `npm start` then serves on that port. The dev proxy reads `PORT` from `server/.env`, so it follows automatically.
 
 ### Configuration (`server/.env`)
 
@@ -83,7 +87,7 @@ For UI development with hot reload, run `npm run dev` in `client/` (http://local
 | `AI_MODE` | `auto` (live when a key is set), `off` |
 | `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
 | `TELEGRAM_MODE` | `auto` (long polling when a token is set), `off` |
-| `HOST` / `PORT` | Default `127.0.0.1:4000` |
+| `HOST` / `PORT` | Default `127.0.0.1:4000`. The dashboard's dev proxy follows `PORT`. |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `SESSION_SECRET` | Admin login (see below). **Required** when `NODE_ENV=production` or `HOST` isn't localhost. |
 | `SESSION_TTL_HOURS` | Sign-in lifetime, default 8 |
 | `NODE_ENV` | `production` adds the Secure cookie flag and HSTS, and requires the admin login |
@@ -174,11 +178,29 @@ Offer messages have **Claim** and **Not interested** buttons. Only the chat id a
 
 | Page | What you can do |
 |---|---|
-| **Overview** | KPIs, recent decisions, segments and offer budgets |
-| **Customers** | Pick a synthetic shopper, see their behaviour and which offers the rules allow (and why others are excluded), then act on them (see below) |
-| **Offers** | Terms, eligibility, validity and budget; pause or activate. Activation is refused if the offer breaks the current rules. |
-| **Rules** | Edit limits in plain language; every save creates a new version |
-| **Decision log** | Full audit per decision: candidates, AI attempts, validation history, delivery |
+| **Overview** | KPIs for the last 7, 30 or 90 days or all time, daily decision outcomes, segments, recent decisions and offer budgets |
+| **Campaign results** | Results of the decisions made in a period, filtered by date range (or custom dates), segment, offer and source. See below. |
+| **Customers** | Search, filter and sort synthetic shoppers. Open one to see their behaviour and which offers the rules allow (and why others are excluded), then act on them (see below). |
+| **Offers** | Create offers and edit their terms, eligibility, validity, budget and limits. Pause, activate or archive them, with a confirmation each time. See below. |
+| **Business rules** | Edit limits in plain language with live previews. A review step shows old and new values and asks for a change note; every save creates a new version. |
+| **Decision log** | Search, filter and sort every decision, then open its full audit: candidates, AI attempts, validation history, delivery and engagement |
+
+**Campaign results** is computed on the server from stored records:
+- a funnel from decisions to offers issued, delivered and claimed;
+- Telegram delivery success, failures and automatic retries;
+- claim rates by offer and by segment, with small samples flagged;
+- budget reserved, released and still held;
+- why offers were withheld or stopped.
+
+Every figure covers the decisions made in the chosen period. Deliveries and taps that came later count toward the day of their decision. Generated figures (from the engine) are labelled separately from observed ones (Telegram results and classmates' taps). A claim is a button tap, not a purchase. Purchases, revenue and lift are listed as **not measured**, because the product has no checkout or holdout group, rather than being estimated.
+
+**Creating and editing offers:**
+- **New offer** opens a form with field-by-field validation. A new offer starts as a **draft**.
+- A draft that breaks the current business rules is saved, but flagged, and it can't be activated until it's fixed.
+- Editing a live offer asks for confirmation. Changing its terms, eligibility, validity, budget or limits creates a new version. Customers who already received the offer keep their original terms.
+- A budget can't be lowered below what is already reserved or redeemed.
+
+**Light and dark theme:** the sun / moon icon switches the whole dashboard, including the sign-in page, between light and dark. It sits in the sidebar on desktop and in the top bar on phones. The choice is remembered in the browser; the first visit follows the computer's light or dark setting.
 
 On the **Customers** page, the three actions are:
 
@@ -188,7 +210,7 @@ On the **Customers** page, the three actions are:
 
 ## Deployment
 
-The app runs as **one** continuously running Node service: API, dashboard and Telegram bot together. It's deployed on **Render**, with data in **MongoDB Atlas**. The root `package.json` provides `build` (`npm run build`) and `start` (`npm start`); Node 24 is required.
+The app runs as **one** continuously running Node service: API, dashboard and Telegram bot together. It's set up for hosting on **Render**, with data in **MongoDB Atlas**; for this submission it runs locally on the presenter's laptop. Only one copy of the bot can run at a time, so don't run a local copy and a hosted copy with the same bot token together. The root `package.json` provides `build` (`npm run build`) and `start` (`npm start`); Node 24 is required.
 
 See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for:
 - why it must be a single always-on process;
