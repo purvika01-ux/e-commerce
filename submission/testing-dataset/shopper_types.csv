@@ -1,0 +1,9 @@
+﻿bot_shopper_type,persona,customers,segments,eligible_offers_seen
+Loyal big spender,loyal_high_value,9,champion (9),LOYALPTS200 (9)
+Deal hunter,deal_seeker,14,price_sensitive (8) hibernating (2) at_risk (2) champion (1) promising (1),FREESHIP (9) WINBACK15 (4) LOYALPTS200 (1) CARTSAVE10 (1)
+Brand-new shopper,new_customer,23,new (22) promising (1),FREESHIP (22) WELCOME100 (14) CARTSAVE10 (8) none (1)
+Drifting away,at_risk,15,at_risk (9) promising (2) loyal (2) champion (1) hibernating (1),WINBACK15 (10) FREESHIP (2) LOYALPTS200 (2) none (1)
+Long-lost customer,dormant,10,hibernating (7) at_risk (3),WINBACK15 (6) none (4)
+Cart abandoner,cart_abandoner,16,price_sensitive (6) promising (6) loyal (2) window_shopper (1) champion (1),CARTSAVE10 (13) FREESHIP (12) LOYALPTS200 (3) none (1)
+Window shopper,window_shopper,15,window_shopper (14) hibernating (1),FREESHIP (14) CARTSAVE10 (6) none (1)
+Occasional buyer,occasional,18,promising (7) hibernating (5) window_shopper (2) at_risk (2) loyal (1) price_sensitive (1),FREESHIP (9) none (5) WINBACK15 (3) LOYALPTS200 (1)

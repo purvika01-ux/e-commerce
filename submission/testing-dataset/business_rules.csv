@@ -1,0 +1,12 @@
+﻿rule,enabled,plain_language,parameters
+MAX_DISCOUNT_PERCENT,true,No offer may give more than 25% off,"{""maxPercent"":25}"
+MAX_DISCOUNT_AMOUNT,true,No single offer may be worth more than ₹500,"{""maxPaise"":50000}"
+MIN_ORDER_FOR_DISCOUNT,true,Discounts need a minimum basket of ₹499,"{""minPaise"":49900}"
+FREQUENCY_CAP,true,At most 2 offers per customer every 7 days,"{""maxOffers"":2,""windowDays"":7}"
+PURCHASE_COOLDOWN,true,Don't send discounts within 2 days of a purchase,"{""days"":2}"
+NO_STACKING,true,A customer can hold at most 1 unused offer(s),"{""maxActiveGrants"":1,""stackableTypes"":[""bonus_points""]}"
+LIKELY_BUYER_SUPPRESSION,true,Don't give discounts to customers already 70%+ likely to buy,"{""maxPurchaseProbability"":0.7,""appliesToTypes"":[""percent_off"",""flat_off""]}"
+RETURN_ABUSE_EXCLUSION,true,Skip customers who return more than 40% of orders,"{""maxReturnRate"":0.4}"
+SEGMENT_EXCLUSION,true,No excluded segments,"{""segments"":[]}"
+OFFER_EXPIRY_BUFFER,true,Don't send an offer that ends in under 2 hours,"{""minHoursRemaining"":2}"
+COPY_POLICY,true,"Message wording: headline ≤ 60 chars, body ≤ 280 chars, no banned phrases","{""maxHeadline"":60,""maxBody"":280,""bannedPhrases"":[""guaranteed"",""last chance ever"",""risk-free"",""act now or lose""]}"
