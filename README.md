@@ -17,7 +17,8 @@ Offerly AI decides which offer each customer of an e-commerce platform should re
 |---|---|
 | Telegram bot | **[@SmartOffersAI_Bot](https://t.me/SmartOffersAI_Bot)** |
 | Repository | `github.com/purvika01-ux/e-commerce` (this repo) |
-| Dashboard | Shown live from the presenter's laptop; it is not publicly hosted. Locally it runs at `http://127.0.0.1:4000` with `npm start` (or the port set by `PORT`, see [Setup](#setup)), or `http://localhost:5173` in dev mode. Sign-in is required. |
+| Dashboard | **[e-commerce-gx9q.onrender.com](https://e-commerce-gx9q.onrender.com/)**, hosted on Render. Sign-in is required; evaluators get the login privately. Locally it runs at `http://127.0.0.1:4000` with `npm start` (or the port set by `PORT`, see [Setup](#setup)), or `http://localhost:5173` in dev mode. |
+| Test data | Built in: 120 synthetic customers, 7 offers and rule set v1 (`npm run seed`). Nothing to upload. |
 | Project instructions | [`CLAUDE.md`](CLAUDE.md) |
 
 **Try it in Telegram:**
@@ -210,7 +211,7 @@ On the **Customers** page, the three actions are:
 
 ## Deployment
 
-The app runs as **one** continuously running Node service: API, dashboard and Telegram bot together. It's set up for hosting on **Render**, with data in **MongoDB Atlas**; for this submission it runs locally on the presenter's laptop. Only one copy of the bot can run at a time, so don't run a local copy and a hosted copy with the same bot token together. The root `package.json` provides `build` (`npm run build`) and `start` (`npm start`); Node 24 is required.
+The app runs as **one** continuously running Node service: API, dashboard and Telegram bot together. It's hosted on **Render** at https://e-commerce-gx9q.onrender.com/, with data in **MongoDB Atlas**. An uptime monitor requests `/api/health` every 5 minutes so the free instance doesn't sleep. A separate copy of the dashboard can also run on Vercel (`VITE_API_URL` on Vercel, `CORS_ORIGINS` on Render; see `docs/DEPLOYMENT.md` §9). Only one copy of the bot can run at a time, so don't run a local copy and a hosted copy with the same bot token together. The root `package.json` provides `build` (`npm run build`) and `start` (`npm start`); Node 24 is required.
 
 See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for:
 - why it must be a single always-on process;
