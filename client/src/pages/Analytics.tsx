@@ -491,7 +491,7 @@ function BudgetCard({ data }: { data: AnalyticsReport }) {
       </div>
       {c.reservedPaise > 0 && (
         <div className="mt-4">
-          <div className="flex h-2.5 gap-[2px] overflow-hidden rounded-full bg-surface-3" role="img" aria-label={`${Math.round(releasedShare)}% released, ${Math.round(heldShare)}% still held`}>
+          <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-surface-3" role="img" aria-label={`${Math.round(releasedShare)}% released, ${Math.round(heldShare)}% still held`}>
             <div className="h-full bg-neutral-mark" style={{ width: `${releasedShare}%` }} />
             <div className="h-full bg-accent/80" style={{ width: `${heldShare}%` }} />
           </div>
@@ -563,7 +563,7 @@ function OfferTable({ data }: { data: AnalyticsReport }) {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className="w-full min-w-215 text-sm">
             <caption className="sr-only">Results per offer</caption>
             <thead className="border-y border-line bg-surface-2/50">
               <tr>
@@ -645,7 +645,7 @@ function SegmentTable({ data }: { data: AnalyticsReport }) {
   return (
     <Card title="Segment comparison" subtitle="Segment as it was when each decision was made. Differences describe what happened, not why." padded={false}>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-sm">
+        <table className="w-full min-w-190 text-sm">
           <caption className="sr-only">Results per customer segment</caption>
           <thead className="border-y border-line bg-surface-2/50">
             <tr>

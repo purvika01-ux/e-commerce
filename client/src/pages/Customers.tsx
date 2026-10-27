@@ -86,7 +86,7 @@ export function Customers({ telegramEnabled, aiLive }: { telegramEnabled: boolea
         ) : (
           <>
             <div className={`overflow-x-auto transition-opacity ${list.loading ? 'opacity-60' : ''}`}>
-              <table className="w-full min-w-[760px] text-sm">
+              <table className="w-full min-w-190 text-sm">
                 <thead className="border-b border-line bg-surface-2/50">
                   <tr>
                     {header('name', 'Customer', 'asc')}
@@ -197,7 +197,7 @@ function CustomerPanel({ id, telegramEnabled, aiLive }: { id: string; telegramEn
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-accent/25 to-ai/25 text-ink">
+          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-linear-to-br from-accent/25 to-ai/25 text-ink">
             <UserRound size={22} aria-hidden />
           </span>
           <div>

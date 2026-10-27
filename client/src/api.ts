@@ -15,7 +15,9 @@ export const UNAUTHENTICATED_EVENT = 'offerly:unauthenticated';
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, {
+    const API_URL = import.meta.env.VITE_API_URL ?? "";
+
+    res = await fetch(`${API_URL}/api${path}`, {
       ...init,
       credentials: 'same-origin',
       // The custom header is the server's CSRF check for state-changing requests.
