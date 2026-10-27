@@ -18,6 +18,8 @@ export interface AuthConfig {
   sessionTtlMs: number;
   /** Sign out after this long without activity. */
   idleTimeoutMs: number;
+  /** The dashboard is hosted on another site (CORS_ORIGINS in production): cookie becomes SameSite=None. */
+  crossSiteCookie?: boolean;
 }
 
 /** Failed logins per username before that username is locked for the rest of the window. */
@@ -57,23 +59,51 @@ export function securityHeaders(opts: { hsts: boolean }) {
   };
 }
 
+const CORS_METHODS = 'GET, POST, PUT, PATCH, DELETE';
+const CORS_HEADERS = `Content-Type, ${CSRF_HEADER}, Idempotency-Key, X-Request-Id`;
+
+/**
+ * CORS for an explicit allowlist of dashboard origins (e.g. the Vercel deployment and the local Vite
+ * dev server). Allowed preflights are answered before rate limits and auth, since browsers send them
+ * without cookies. Any other origin gets no access headers, so the browser keeps blocking it.
+ */
+export function corsAllowlist(allowed: ReadonlySet<string>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (allowed.size === 0) return next();
+    res.vary('Origin');
+    const origin = req.get('Origin');
+    if (!origin || !allowed.has(origin)) return next();
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    if (req.method === 'OPTIONS' && req.get('Access-Control-Request-Method')) {
+      res.setHeader('Access-Control-Allow-Methods', CORS_METHODS);
+      res.setHeader('Access-Control-Allow-Headers', CORS_HEADERS);
+      res.setHeader('Access-Control-Max-Age', '600');
+      return void res.status(204).end();
+    }
+    next();
+  };
+}
+
 function hasCsrfHeader(req: Request): boolean {
   return req.get(CSRF_HEADER) === CSRF_VALUE;
 }
 
 /**
  * Second CSRF layer: browsers send Origin (and Sec-Fetch-Site) on state-changing requests.
- * A request that says it comes from another site is refused even if it somehow carries the header.
+ * A request that says it comes from another site is refused even if it somehow carries the header,
+ * unless its Origin is one of the configured dashboard origins.
  */
-function isCrossSite(req: Request): boolean {
-  if (req.get('Sec-Fetch-Site') === 'cross-site') return true;
+function isCrossSite(req: Request, trustedOrigins: ReadonlySet<string>): boolean {
   const origin = req.get('Origin');
+  if (origin && trustedOrigins.has(origin)) return false;
+  if (req.get('Sec-Fetch-Site') === 'cross-site') return true;
   if (!origin || origin === 'null') return origin === 'null';
   return origin !== `${req.protocol}://${req.get('host')}`;
 }
 
-function assertSameSiteRequest(req: Request) {
-  if (!hasCsrfHeader(req) || isCrossSite(req)) throw new AppError('FORBIDDEN', 403, 'Request blocked by CSRF protection');
+function assertSameSiteRequest(req: Request, trustedOrigins: ReadonlySet<string>) {
+  if (!hasCsrfHeader(req) || isCrossSite(req, trustedOrigins)) throw new AppError('FORBIDDEN', 403, 'Request blocked by CSRF protection');
 }
 
 function sameString(a: string, b: string): boolean {
@@ -83,7 +113,7 @@ function sameString(a: string, b: string): boolean {
 }
 
 /** /api/auth: login, logout, me. When auth is disabled (local-only use) me reports that. */
-export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: RateLimiter, logger: Logger): Router {
+export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: RateLimiter, logger: Logger, trustedOrigins: ReadonlySet<string> = new Set()): Router {
   const r = Router();
   // The limiter reports "not allowed" once the count exceeds max, so max = maxFailures - 1 locks on the Nth failure.
   const failures = createRateLimiter({ windowMs: USERNAME_LOCKOUT.windowMs, max: USERNAME_LOCKOUT.maxFailures - 1 });
@@ -101,7 +131,7 @@ export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: 
     rateLimit(loginLimiter, (req) => `login:${req.ip}`),
     async (req, res) => {
       if (!auth) throw new AppError('AUTH_DISABLED', 400, 'Login is not configured on this server');
-      assertSameSiteRequest(req);
+      assertSameSiteRequest(req, trustedOrigins);
       const body = z.object({ username: z.string().min(1).max(64), password: z.string().min(1).max(128) }).strict().safeParse(req.body);
       if (!body.success) throw badRequest('Enter a username and password');
 
@@ -129,7 +159,7 @@ export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: 
       lockedUntil.delete(key);
 
       const session = await createSession(auth.username, policyOf(auth), clock.now());
-      res.setHeader('Set-Cookie', sessionCookie(session.token, { secure: auth.secureCookie, maxAgeMs: auth.sessionTtlMs }));
+      res.setHeader('Set-Cookie', sessionCookie(session.token, { secure: auth.secureCookie, maxAgeMs: auth.sessionTtlMs, crossSite: auth.crossSiteCookie }));
       res.setHeader('Cache-Control', 'no-store');
       logger.info('admin signed in', { event: 'login_succeeded', user: auth.username, ip: req.ip });
       res.json({ authRequired: true, user: { username: auth.username, expiresAt: session.expiresAt } });
@@ -138,11 +168,11 @@ export function authRouter(auth: AuthConfig | null, clock: Clock, loginLimiter: 
 
   r.post('/logout', async (req, res) => {
     if (auth) {
-      assertSameSiteRequest(req);
+      assertSameSiteRequest(req, trustedOrigins);
       await destroySession(tokenOf(req, auth), policyOf(auth));
       logger.info('admin signed out', { event: 'logout', ip: req.ip });
     }
-    res.setHeader('Set-Cookie', clearedSessionCookie(auth?.secureCookie ?? false));
+    res.setHeader('Set-Cookie', clearedSessionCookie(auth?.secureCookie ?? false, auth?.crossSiteCookie));
     res.status(204).end();
   });
 
@@ -165,11 +195,11 @@ export function requireAuth(auth: AuthConfig | null, clock: Clock) {
 }
 
 /** CSRF defence for cookie sessions: state-changing requests need the custom header and must not be cross-site. */
-export function csrfGuard(auth: AuthConfig | null) {
+export function csrfGuard(auth: AuthConfig | null, trustedOrigins: ReadonlySet<string> = new Set()) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!auth || SAFE_METHODS.has(req.method)) return next();
     try {
-      assertSameSiteRequest(req);
+      assertSameSiteRequest(req, trustedOrigins);
       next();
     } catch (err) {
       next(err);

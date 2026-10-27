@@ -67,12 +67,18 @@ export function readCookie(header: string | undefined, name: string): string | u
   return undefined;
 }
 
-export function sessionCookie(token: string, opts: { secure: boolean; maxAgeMs: number }): string {
-  const parts = [`${sessionCookieName(opts.secure)}=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Strict', `Max-Age=${Math.floor(opts.maxAgeMs / 1000)}`];
+/**
+ * SameSite=None only when the dashboard is on another site (e.g. Vercel) and the cookie is Secure;
+ * browsers reject SameSite=None without Secure. CSRF is then covered by the header + origin allowlist.
+ */
+const sameSiteOf = (secure: boolean, crossSite = false) => (secure && crossSite ? 'SameSite=None' : 'SameSite=Strict');
+
+export function sessionCookie(token: string, opts: { secure: boolean; maxAgeMs: number; crossSite?: boolean }): string {
+  const parts = [`${sessionCookieName(opts.secure)}=${token}`, 'Path=/', 'HttpOnly', sameSiteOf(opts.secure, opts.crossSite), `Max-Age=${Math.floor(opts.maxAgeMs / 1000)}`];
   if (opts.secure) parts.push('Secure');
   return parts.join('; ');
 }
 
-export function clearedSessionCookie(secure: boolean): string {
-  return [`${sessionCookieName(secure)}=`, 'Path=/', 'HttpOnly', 'SameSite=Strict', 'Max-Age=0', ...(secure ? ['Secure'] : [])].join('; ');
+export function clearedSessionCookie(secure: boolean, crossSite = false): string {
+  return [`${sessionCookieName(secure)}=`, 'Path=/', 'HttpOnly', sameSiteOf(secure, crossSite), 'Max-Age=0', ...(secure ? ['Secure'] : [])].join('; ');
 }

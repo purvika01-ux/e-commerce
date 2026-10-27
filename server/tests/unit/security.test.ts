@@ -42,6 +42,13 @@ describe('session cookies', () => {
     expect(sessionCookieName(true)).toBe('__Host-offerly_session');
   });
 
+  it('use SameSite=None only for a Secure cookie when the dashboard is on another site', () => {
+    expect(sessionCookie('tok', { secure: true, maxAgeMs: 3_600_000, crossSite: true })).toBe('__Host-offerly_session=tok; Path=/; HttpOnly; SameSite=None; Max-Age=3600; Secure');
+    expect(sessionCookie('tok', { secure: false, maxAgeMs: 3_600_000, crossSite: true })).toContain('SameSite=Strict');
+    expect(clearedSessionCookie(true, true)).toContain('SameSite=None');
+    expect(clearedSessionCookie(true)).toContain('SameSite=Strict');
+  });
+
   it('reads one cookie from a header', () => {
     expect(readCookie('a=1; offerly_session=tok%2Ben; b=2', 'offerly_session')).toBe('tok+en');
     expect(readCookie('a=1', 'offerly_session')).toBeUndefined();
@@ -76,6 +83,27 @@ describe('configuration guard', () => {
     expect(loadConfig(base as NodeJS.ProcessEnv).authEnabled).toBe(false);
     expect(message({ ...base, NODE_ENV: 'production' })).toContain('ADMIN_PASSWORD_HASH and SESSION_SECRET');
     expect(message({ ...base, HOST: '0.0.0.0' })).toContain('ADMIN_PASSWORD_HASH and SESSION_SECRET');
+  });
+
+  it('CORS_ORIGINS: exact https origins in production, local Vite only in development, nothing by default in production', async () => {
+    const hash = await hashPassword('a long admin password', FAST);
+    const prod = { ...base, NODE_ENV: 'production', HOST: '0.0.0.0', ADMIN_PASSWORD_HASH: hash, SESSION_SECRET: SECRET };
+    const none = loadConfig(prod as NodeJS.ProcessEnv);
+    expect(none.corsOrigins).toEqual([]);
+    expect(none.crossSiteCookie).toBe(false);
+
+    const vercel = loadConfig({ ...prod, CORS_ORIGINS: ' https://my-app.vercel.app/ , https://www.example.com' } as NodeJS.ProcessEnv);
+    expect(vercel.corsOrigins).toEqual(['https://my-app.vercel.app', 'https://www.example.com']);
+    expect(vercel.crossSiteCookie).toBe(true);
+
+    for (const bad of ['*', 'https://*.vercel.app', 'https://my-app.vercel.app/login', 'my-app.vercel.app', 'ftp://x.example']) {
+      expect(message({ ...prod, CORS_ORIGINS: bad })).toContain('CORS_ORIGINS');
+    }
+    expect(message({ ...prod, CORS_ORIGINS: 'http://my-app.vercel.app' })).toContain('https://');
+
+    const dev = loadConfig(base as NodeJS.ProcessEnv);
+    expect(dev.corsOrigins).toEqual(['http://localhost:5173', 'http://127.0.0.1:5173']);
+    expect(dev.crossSiteCookie).toBe(false);
   });
 
   it('enables login when both values are present, and rejects half a configuration', async () => {

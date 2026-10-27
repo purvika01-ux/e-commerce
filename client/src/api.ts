@@ -12,14 +12,16 @@ export class ApiError extends Error {
 /** Fired when the session is missing or expired, so the app can show the sign-in screen. */
 export const UNAUTHENTICATED_EVENT = 'offerly:unauthenticated';
 
+/** Empty when the API serves the dashboard (same origin); the API's origin when hosted separately, e.g. on Vercel. */
+const API_URL = String(import.meta.env.VITE_API_URL ?? '').trim().replace(/\/+$/, '').replace(/\/api$/, '');
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    const API_URL = import.meta.env.VITE_API_URL ?? "";
-
     res = await fetch(`${API_URL}/api${path}`, {
       ...init,
-      credentials: 'same-origin',
+      // A separately hosted dashboard (e.g. Vercel) must send the session cookie to the API's origin.
+      credentials: API_URL ? 'include' : 'same-origin',
       // The custom header is the server's CSRF check for state-changing requests.
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'offerly', ...(init?.headers ?? {}) },
     });

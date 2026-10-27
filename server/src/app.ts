@@ -7,7 +7,7 @@ import mongoose from 'mongoose';
 import { AppError } from './infra/errors';
 import type { Logger } from './infra/logger';
 import { apiRouter, type ApiDeps } from './routes/api';
-import { authRouter, csrfGuard, requireAuth, securityHeaders, type AuthConfig } from './security/http';
+import { authRouter, corsAllowlist, csrfGuard, requireAuth, securityHeaders, type AuthConfig } from './security/http';
 import { createRateLimiter, DEFAULT_RATE_LIMITS, rateLimit, type RateLimitSettings } from './security/rateLimit';
 
 export interface AppOptions {
@@ -19,6 +19,8 @@ export interface AppOptions {
   /** Express "trust proxy" setting, needed behind a hosting proxy so rate limits see the real client IP. */
   trustProxy?: boolean | number;
   hsts?: boolean;
+  /** Exact origins allowed to call the API cross-origin (dashboard hosted elsewhere, local Vite). */
+  corsOrigins?: readonly string[];
 }
 
 export function buildApp(deps: ApiDeps & AppOptions) {
@@ -30,6 +32,7 @@ export function buildApp(deps: ApiDeps & AppOptions) {
   const loginLimiter = createRateLimiter({ windowMs: limits.windowMs, max: limits.login });
   // Signed-in requests are limited per admin; anything else per client IP.
   const clientKey = (req: Request, res: Response) => String(res.locals.user ?? req.ip ?? 'unknown');
+  const corsOrigins = new Set(deps.corsOrigins ?? []);
 
   app.disable('x-powered-by');
   app.set('trust proxy', deps.trustProxy ?? false);
@@ -43,11 +46,12 @@ export function buildApp(deps: ApiDeps & AppOptions) {
     next();
   });
 
-  // Order matters: per-IP limit → login/logout/me → session required → CSRF header → per-route limits → API.
+  // Order matters: CORS (allowlisted preflights end here) → per-IP limit → login/logout/me → session required → CSRF header → per-route limits → API.
+  app.use('/api', corsAllowlist(corsOrigins));
   app.use('/api', rateLimit(apiLimiter, (req) => `ip:${req.ip}`));
-  app.use('/api/auth', authRouter(auth, deps.clock, loginLimiter, deps.logger));
+  app.use('/api/auth', authRouter(auth, deps.clock, loginLimiter, deps.logger, corsOrigins));
   app.use('/api', requireAuth(auth, deps.clock));
-  app.use('/api', csrfGuard(auth));
+  app.use('/api', csrfGuard(auth, corsOrigins));
   app.post('/api/recommendations', rateLimit(recommendationLimiter, (req, res) => `rec:${clientKey(req, res)}`));
   app.use('/api', apiRouter(deps));
   app.use('/api', (_req, _res, next) => next(new AppError('NOT_FOUND', 404, 'Route not found')));

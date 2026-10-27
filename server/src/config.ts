@@ -33,15 +33,36 @@ const EnvSchema = z.object({
   ),
   // Set when running behind a hosting proxy so rate limits see the real client IP (true or a hop count).
   TRUST_PROXY: z.preprocess(blankToUndefined, z.union([z.enum(['true', 'false']).transform((v) => v === 'true'), z.coerce.number().int().min(0).max(5)]).default(false)),
+  // Optional comma-separated browser origins that may call the API when the dashboard is hosted
+  // elsewhere (e.g. https://my-app.vercel.app). Exact origins only; empty = same-origin only.
+  CORS_ORIGINS: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() ? v.split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean) : []),
+    z.array(z.string().refine(isExactOrigin, 'each entry must be an exact origin such as https://my-app.vercel.app (no path, no wildcard)')).max(10),
+  ),
 });
 
 export type Config = z.infer<typeof EnvSchema> & {
   aiEnabled: boolean;
   telegramEnabled: boolean;
   authEnabled: boolean;
+  /** CORS_ORIGINS plus, outside production, the local Vite dev server. */
+  corsOrigins: string[];
+  /** The dashboard is on another site, so the session cookie must be SameSite=None. */
+  crossSiteCookie: boolean;
 };
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+const DEV_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
+function isExactOrigin(s: string): boolean {
+  if (s.includes('*')) return false;
+  try {
+    const u = new URL(s);
+    return (u.protocol === 'https:' || u.protocol === 'http:') && u.origin === s;
+  } catch {
+    return false;
+  }
+}
 
 export class ConfigError extends Error {}
 
@@ -71,11 +92,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       'Invalid configuration:\n  - ADMIN_PASSWORD_HASH and SESSION_SECRET: required in production or when HOST is not localhost (run npm run setup-admin)',
     );
   }
+  const production = c.NODE_ENV === 'production';
+  if (production && c.CORS_ORIGINS.some((o) => !o.startsWith('https://'))) {
+    throw new ConfigError('Invalid configuration:\n  - CORS_ORIGINS: production origins must use https://');
+  }
   return {
     ...c,
     aiEnabled: c.AI_MODE !== 'off' && Boolean(c.ANTHROPIC_API_KEY),
     telegramEnabled: c.TELEGRAM_MODE !== 'off' && Boolean(c.TELEGRAM_BOT_TOKEN),
     authEnabled,
+    corsOrigins: [...new Set([...c.CORS_ORIGINS, ...(production ? [] : DEV_ORIGINS)])],
+    crossSiteCookie: production && c.CORS_ORIGINS.length > 0,
   };
 }
 

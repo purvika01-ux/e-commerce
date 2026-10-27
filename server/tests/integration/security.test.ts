@@ -20,6 +20,7 @@ const AUTH: AuthConfig = {
 };
 const STATUS: ServiceStatus = { aiMode: 'fallback_only', model: null, telegram: { enabled: false, botUsername: null, status: 'disabled' } };
 const CSRF = { 'X-Requested-With': 'offerly' };
+const VERCEL = 'https://offerly-dashboard.vercel.app'; // placeholder: the real origin comes from CORS_ORIGINS
 
 let fx: Awaited<ReturnType<typeof seedFixtures>>;
 let clock: FakeClock;
@@ -203,11 +204,82 @@ describe('CSRF protection (403)', () => {
     expect(nullOrigin.status).toBe(403);
   });
 
+  it('without CORS_ORIGINS, a Vercel-style origin is treated like any other site', async () => {
+    const res = await request(app).post('/api/auth/login').set(CSRF).set('Origin', VERCEL).set('Sec-Fetch-Site', 'cross-site').send({ username: 'admin', password: PASSWORD });
+    expect(res.status).toBe(403);
+  });
+
   it('login and logout themselves need the header', async () => {
     expect((await request(app).post('/api/auth/login').send({ username: 'admin', password: PASSWORD })).status).toBe(403);
     const pair = await signIn();
     expect((await request(app).post('/api/auth/logout').set('Cookie', pair)).status).toBe(403);
     expect((await request(app).get('/api/overview').set('Cookie', pair)).status).toBe(200); // not logged out
+  });
+});
+
+describe('dashboard hosted on another origin (CORS allowlist, e.g. Vercel → Render)', () => {
+  const crossApp = () => makeApp({ auth: { ...AUTH, secureCookie: true, crossSiteCookie: true }, corsOrigins: [VERCEL] });
+  const preflight = (a: ReturnType<typeof buildApp>, origin: string, path = '/api/auth/login') =>
+    request(a).options(path).set('Origin', origin).set('Access-Control-Request-Method', 'POST').set('Access-Control-Request-Headers', 'content-type,x-requested-with,idempotency-key');
+
+  it('answers the allowed origin’s preflight before auth and rate limits, with credentials allowed', async () => {
+    const a = crossApp();
+    for (const path of ['/api/auth/login', '/api/recommendations', '/api/rules']) {
+      const res = await preflight(a, VERCEL, path);
+      expect(res.status).toBe(204);
+      expect(res.headers['access-control-allow-origin']).toBe(VERCEL);
+      expect(res.headers['access-control-allow-credentials']).toBe('true');
+      expect(res.headers['access-control-allow-headers']).toMatch(/X-Requested-With/);
+      expect(res.headers['access-control-allow-headers']).toMatch(/Idempotency-Key/);
+      expect(res.headers.vary).toMatch(/Origin/);
+    }
+  });
+
+  it('gives any other origin no access headers (never a wildcard)', async () => {
+    const a = crossApp();
+    for (const origin of ['https://evil.example', 'https://evil-offerly-dashboard.vercel.app', `${VERCEL}.evil.example`, 'null']) {
+      const res = await preflight(a, origin);
+      expect(res.status).not.toBe(204);
+      expect(res.headers['access-control-allow-origin']).toBeUndefined();
+      expect((await request(a).get('/api/health').set('Origin', origin)).headers['access-control-allow-origin']).toBeUndefined();
+    }
+  });
+
+  it('signs in from the allowed origin with a Secure, SameSite=None, __Host- cookie, then uses it', async () => {
+    const a = crossApp();
+    const res = await request(a).post('/api/auth/login').set(CSRF).set('Origin', VERCEL).set('Sec-Fetch-Site', 'cross-site').send({ username: 'admin', password: PASSWORD });
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe(VERCEL);
+    const cookie = (res.headers['set-cookie'] as unknown as string[])[0];
+    expect(cookie).toMatch(/^__Host-offerly_session=[A-Za-z0-9_-]{43}; Path=\/; HttpOnly; SameSite=None;.*Secure$/);
+    const pair = cookiePair(res);
+    expect((await request(a).get('/api/offers').set('Origin', VERCEL).set('Cookie', pair)).status).toBe(200);
+    const write = await request(a).post('/api/recommendations').set('Origin', VERCEL).set('Sec-Fetch-Site', 'cross-site').set('Cookie', pair).set(CSRF).set('Idempotency-Key', key()).send({ customerId: fx.customers.atRisk });
+    expect(write.status).toBe(201);
+    const out = await request(a).post('/api/auth/logout').set('Origin', VERCEL).set(CSRF).set('Cookie', pair);
+    expect(out.status).toBe(204);
+    expect((out.headers['set-cookie'] as unknown as string[])[0]).toMatch(/SameSite=None.*Max-Age=0/);
+  });
+
+  it('keeps every other protection: auth, the CSRF header, and other origins', async () => {
+    const a = crossApp();
+    expect((await request(a).get('/api/overview').set('Origin', VERCEL)).status).toBe(401);
+    const signedIn = await request(a).post('/api/auth/login').set(CSRF).set('Origin', VERCEL).send({ username: 'admin', password: PASSWORD });
+    const pair = cookiePair(signedIn);
+    const noHeader = await request(a).put('/api/rules').set('Origin', VERCEL).set('Cookie', pair).send({});
+    expect(noHeader.status).toBe(403);
+    const fromEvil = await request(a).put('/api/rules').set('Origin', 'https://evil.example').set('Sec-Fetch-Site', 'cross-site').set('Cookie', pair).set(CSRF).send({});
+    expect(fromEvil.status).toBe(403);
+    const evilLogin = await request(a).post('/api/auth/login').set(CSRF).set('Origin', 'https://evil.example').send({ username: 'admin', password: PASSWORD });
+    expect(evilLogin.status).toBe(403);
+  });
+
+  it('allowed requests still count toward the rate limit', async () => {
+    const a = makeApp({ corsOrigins: [VERCEL], rateLimits: { api: 2 } });
+    for (let i = 0; i < 2; i++) expect((await request(a).get('/api/health').set('Origin', VERCEL)).status).toBe(200);
+    const limited = await request(a).get('/api/health').set('Origin', VERCEL);
+    expect(limited.status).toBe(429);
+    expect(limited.headers['access-control-allow-origin']).toBe(VERCEL); // so the dashboard can show the message
   });
 });
 

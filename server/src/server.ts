@@ -119,8 +119,10 @@ async function main() {
           secureCookie: config.NODE_ENV === 'production',
           sessionTtlMs: config.SESSION_TTL_HOURS * 3_600_000,
           idleTimeoutMs: config.SESSION_IDLE_MINUTES * 60_000,
+          crossSiteCookie: config.crossSiteCookie,
         }
       : null,
+    corsOrigins: config.corsOrigins,
     trustProxy: config.TRUST_PROXY,
     hsts: config.NODE_ENV === 'production',
     status: () => {

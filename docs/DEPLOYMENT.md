@@ -51,7 +51,7 @@ Render's docs don't say whether health checks or rollbacks are available on the 
 | Graceful shutdown | On SIGTERM: stop the bot and maintenance, finish in-flight requests (up to 15 s), close the database, exit. A hard exit happens at 25 s, inside Render's 30 s window. |
 | Logs | Structured JSON on stdout/stderr. API keys, the bot token, the database URI, the session secret and the password hash are redacted. |
 | Secrets in the browser | None. The dashboard bundle is checked by an automated test for credential patterns and for the values in your local `.env`. |
-| CORS | Not enabled, on purpose (same-origin only). A test confirms that cross-origin requests get no access headers. |
+| CORS | Off unless `CORS_ORIGINS` is set (same-origin only). Outside production the local Vite origin is allowed. Tests confirm that unlisted origins get no access headers. See §9 for a dashboard hosted on Vercel. |
 
 ## 4. Steps to do in the dashboards
 
@@ -192,6 +192,19 @@ Auto-deploy builds the reverted code. Check `/api/health` → `release`.
 - Free-tier spin-down and restarts, as above.
 - One admin account.
 - Rate limits are keyed by the client address Render forwards. Behind Render's proxy, visitors may share a key. That only affects the admin login and API limits, never the bot.
+
+## 9. Optional: dashboard on Vercel, API on Render
+
+The Render service still serves its own dashboard. A second copy of the dashboard can also run on Vercel:
+
+| Where | Setting |
+|---|---|
+| Vercel → project → Settings → Environment Variables | `VITE_API_URL=https://<name>.onrender.com` (no `/api`, no trailing slash). It is baked in at build time, so redeploy Vercel after changing it. |
+| Render → service → Environment | `CORS_ORIGINS=https://<your-project>.vercel.app`, the exact address in the browser bar. Use commas for several addresses. Vercel preview URLs differ per deploy and must be listed separately. |
+
+With `CORS_ORIGINS` set in production, the session cookie becomes `SameSite=None; Secure`, because Vercel and Render are different sites. CSRF protection stays on: the `X-Requested-With` header is still required, and only listed origins pass the preflight and the Origin check.
+
+**Limitation:** to the browser, that cookie is a third-party cookie. Safari, Brave and Chrome Incognito block third-party cookies by default, so sign-in on the Vercel copy fails there. The Render URL works in every browser, so give judges that link.
 
 ## Appendix: other hosts
 Any always-on Node host works with the same build/start commands and variables, for example Railway, or a VPS with a process manager. Keep **one** instance, and never use serverless functions.
